@@ -3,6 +3,7 @@
 globalThis.TabstackShared = (() => {
 	const api = globalThis.browser ?? globalThis.chrome;
 	const isMac = /Mac/.test(navigator.platform);
+	const isFirefox = typeof api.runtime.getBrowserInfo === "function";
 
 	const DEFAULTS = {
 		searchShortcut: { code: "Slash", key: "/", meta: isMac, ctrl: !isMac, alt: false, shift: false },
@@ -64,5 +65,5 @@ globalThis.TabstackShared = (() => {
 		return [s.ctrl && "Ctrl", s.alt && "Alt", s.shift && "Shift", s.meta && "Meta", s.key].filter(Boolean).join("+");
 	}
 
-	return { api, isMac, DEFAULTS, loadSettings, onSettingsChange, matches, fromEvent, keyName, format };
+	return { api, isMac, isFirefox, DEFAULTS, loadSettings, onSettingsChange, matches, fromEvent, keyName, format };
 })();

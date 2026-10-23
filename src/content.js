@@ -4,7 +4,7 @@
 // smaller relay.js, which forwards their key events here.
 
 (() => {
-	const { api, isMac, DEFAULTS, loadSettings, onSettingsChange, matches } = TabstackShared;
+	const { api, isMac, isFirefox, DEFAULTS, loadSettings, onSettingsChange, matches } = TabstackShared;
 	const MODIFIERS = { Meta: "metaKey", Control: "ctrlKey", Alt: "altKey", Shift: "shiftKey" };
 	const SHOW_DELAY = 120; // a quick tap switches without flashing the UI
 
@@ -58,6 +58,22 @@
 	const modDownAt = {};
 	const modUpAt = {};
 
+	// After a jump from a page tabstack can't run on, Firefox doesn't tell this
+	// page the modifier came up, since it went down over there. The switcher
+	// waits, hidden, for the page's first input, which carries the modifier's
+	// state: the modifier pressed again, or any input without it, means it was
+	// let go.
+	let unheard = false;
+
+	function hear(e) {
+		if (!unheard) return;
+		unheard = false;
+		if (!switcher?.isOpen || switcher.mode !== "cycle") return;
+		const pressedAgain = e.type === "keydown" && e.key === modifier;
+		if (pressedAgain || !e[MODIFIERS[modifier]]) switcher.commit();
+		else show();
+	}
+
 	function syncModifiers(e) {
 		for (const [name, prop] of Object.entries(MODIFIERS)) {
 			if (e[prop]) down.add(name);
@@ -67,6 +83,7 @@
 
 	listen(window, "keydown", (e) => {
 		if (!alive()) return;
+		hear(e);
 		syncModifiers(e);
 		if (e.key in MODIFIERS) modDownAt[e.key] = Date.now();
 
@@ -91,6 +108,7 @@
 
 	listen(window, "keyup", (e) => {
 		if (!alive()) return;
+		hear(e);
 		syncModifiers(e);
 		if (e.key in MODIFIERS) {
 			down.delete(e.key);
@@ -146,6 +164,7 @@
 
 	function hide() {
 		clearTimeout(showTimer);
+		unheard = false;
 		try {
 			switcher.panel.hidePopover();
 		} catch {}
@@ -167,6 +186,7 @@
 		s.switchCode = msg.switchCode ?? s.switchCode;
 		timing = { ...msg.timing, pageAt: Date.now() };
 		s.open("cycle", msg.tabs ?? (await send({ type: "tabs" })) ?? []);
+		if (msg.selected != null) s.select(msg.selected);
 		send({ type: "open" });
 
 		// We were switched to mid-shortcut from a page tabstack can't run on,
@@ -182,6 +202,11 @@
 		}
 		if (msg.jumped) down.add(modifier);
 		takeFocusFromIframe();
+		if (msg.jumped && isFirefox) {
+			// stay hidden: it was most likely a tap
+			unheard = true;
+			return;
+		}
 		showTimer = setTimeout(show, SHOW_DELAY);
 	}
 
@@ -212,13 +237,13 @@
 		if (msg.type === "cycle") onCycle(msg);
 		else if (msg.type === "modUp") onModUp(msg.key);
 		else if (msg.type === "search") openSearch();
-		else if (msg.type === "back" && switcher?.mode === "cycle") switcher.move(-1);
 		sendResponse({ ok: true });
 	}
 	api.runtime.onMessage.addListener(onMessage);
 
 	// Recover from a missed keyup: pointer events carry the modifier state.
 	listen(window, "pointermove", (e) => {
+		hear(e);
 		if (switcher?.isOpen && switcher.mode === "cycle" && !e[MODIFIERS[modifier]]) switcher.commit();
 	});
 	listen(window, "pointerdown", (e) => {

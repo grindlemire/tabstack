@@ -1,7 +1,7 @@
 // Keeps the most-recently-used tab stack, captures thumbnails and favicons, and
 // routes the switch shortcut to the page overlay (content.js). On pages
-// extensions can't touch, it jumps to the previous tab and continues there, or
-// opens the switcher in the toolbar popup (or its own window, if that fails).
+// extensions can't touch, it jumps to the previous tab and continues there.
+// Searching from those pages opens the switcher in the toolbar popup.
 
 // Chrome runs this as a service worker; Firefox lists shared.js before it.
 if (typeof importScripts === "function") importScripts("shared.js");
@@ -12,6 +12,7 @@ const isFirefox = /Firefox\//.test(navigator.userAgent);
 const THUMB_WIDTH = 400;
 const THUMB_LIMIT = 50; // keep thumbnails for this many recent tabs
 const CYCLE_SENT = 5; // tabs a cycle can reach, matching the cards in ui.js
+const PRESS_GAP = 300; // ms between presses that count as one held cycle, between browser pages
 const SAVED_LIMIT = 100; // thumbnails kept across restarts, by page URL
 const CAPTURE_DELAY = 400; // let the page paint after activation
 const CAPTURE_GAP = 600; // Chrome allows ~2 captures per second
@@ -34,11 +35,9 @@ const iconsLoading = new Set();
 const overlayOpen = new Set(); // tab ids showing the switcher
 const captureTimers = new Map(); // window id -> timeout
 let lastCaptureAt = 0;
-const tabInfo = new Map(); // tab id -> { url, windowId }, so the shortcut can decide without waiting
-let started = false; // load() has finished
 let switcherPort = null;
+let blind = null; // { tabs, index, from, at } while quick presses step through browser pages
 let pendingSwitcher = null; // what the switcher that's opening shows: a value or a promise
-let switcherStarted = Promise.resolve(); // the open switcher has been sent its tabs
 let jump = null; // { from, via, to } while a cycle continues on the tab we jumped to
 let commandQueue = Promise.resolve();
 let settings = TabstackShared.DEFAULTS;
@@ -53,7 +52,6 @@ async function load() {
 	]);
 	settings = loaded;
 	const ids = new Set(tabs.map((t) => t.id));
-	for (const tab of tabs) noteTab(tab);
 
 	if (saved.stack) {
 		stack = saved.stack.filter((id) => ids.has(id));
@@ -74,7 +72,6 @@ async function load() {
 	await loadSaved(tabs.filter((t) => !thumbs.has(t.id)).map((t) => t.url));
 	if (api.tabs.captureTab) captureInBackground(tabs);
 	for (const tab of tabs) iconFor(tab); // fetch any that are missing
-	started = true;
 }
 
 onSettingsChange((s) => (settings = s));
@@ -94,13 +91,8 @@ function touch(tabId) {
 	save();
 }
 
-function noteTab(tab) {
-	tabInfo.set(tab.id, { url: tab.url ?? "", windowId: tab.windowId });
-}
-
 function forget(tabId) {
 	stack = stack.filter((id) => id !== tabId);
-	tabInfo.delete(tabId);
 	thumbs.delete(tabId);
 	overlayOpen.delete(tabId);
 	api.storage.session.remove(`thumb:${tabId}`);
@@ -136,14 +128,7 @@ api.tabs.onReplaced?.addListener(async (added, removed) => {
 	save();
 });
 
-api.tabs.onCreated.addListener(noteTab);
-api.tabs.onAttached.addListener((tabId, { newWindowId }) => {
-	const info = tabInfo.get(tabId);
-	if (info) info.windowId = newWindowId;
-});
-
 api.tabs.onUpdated.addListener(async (tabId, change, tab) => {
-	if (change.url) noteTab(tab);
 	if (!change.status && !change.favIconUrl && !change.url) return;
 	// a new favicon URL gets a new key, so iconFor() fetches it
 	await ready;
@@ -442,41 +427,18 @@ api.commands.onCommand.addListener((command, tab) => {
 	if (command !== "switch") return;
 	const timing = { commandAt: Date.now(), swAgeMs: Math.round(performance.now()) };
 
-	if (switcherPort) {
-		switcherStarted.then(() => switcherPort?.postMessage({ type: "cycle" })).catch(() => {});
-		return;
-	}
-	// This page can't show the overlay, so the switcher opens in the toolbar
-	// popup. Firefox only opens it while the shortcut is still being handled,
-	// before anything is awaited, so decide from what's already known.
-	if (tab && started && RESTRICTED.test(tab.url ?? "") && previousTab(tab)) {
-		openSwitcher(tab, switcherStart(tab.id), () => {
-			commandQueue = commandQueue
-				.then(() => cycleWithoutOverlay(tab, timing, { popupFailed: true }))
-				.catch((e) => console.error("[tabstack]", e));
-		});
-		return;
-	}
 	// Capture the tab being left while it's still on screen: the freshest
 	// picture of it there will be.
 	if (tab && !overlayOpen.has(tab.id)) captureNow(tab);
 	commandQueue = commandQueue.then(() => cycle(tab, timing)).catch((e) => console.error("[tabstack]", e));
 });
 
-// The search shortcut is Shift with the switch key, so while a cycle is open
-// it keeps meaning "go forward a tab".
+// Search opens in the page's overlay, or in the toolbar popup on pages the
+// overlay can't run on. Firefox only opens the popup while the shortcut is
+// still being handled, before anything is awaited.
 function searchCommand(tab) {
-	if (switcherPort) {
-		switcherStarted.then(() => switcherPort?.postMessage({ type: "back" })).catch(() => {});
-		return;
-	}
-	if (!tab) return;
-	if (overlayOpen.has(tab.id)) {
-		api.tabs.sendMessage(tab.id, { type: "back" }, { frameId: 0 }).catch(() => {});
-		return;
-	}
-	const inPopup = () => openSwitcher(tab, switcherStart(tab.id).then((s) => ({ ...s, mode: "search" })));
-	// like the switch shortcut, decided before awaiting anything
+	if (!tab || switcherPort) return;
+	const inPopup = () => openSwitcher(tab, switcherStart(tab.id));
 	if (RESTRICTED.test(tab.url ?? "")) inPopup();
 	else api.tabs.sendMessage(tab.id, { type: "search" }, { frameId: 0 }).catch(inPopup);
 }
@@ -484,6 +446,12 @@ function searchCommand(tab) {
 async function cycle(tab, timing) {
 	tab ??= (await api.tabs.query({ active: true, lastFocusedWindow: true }))[0];
 	if (!tab) return;
+
+	if (blind && !overlayOpen.has(tab.id) && Date.now() - blind.at < PRESS_GAP && blind.tabs[blind.index]?.id === tab.id) {
+		await stepBlind(blind.index + 1);
+		return;
+	}
+	blind = null;
 
 	if (!RESTRICTED.test(tab.url ?? "")) {
 		const message = { type: "cycle", timing };
@@ -503,24 +471,23 @@ async function cycle(tab, timing) {
 	await cycleWithoutOverlay(tab, timing);
 }
 
-// This page can't show the overlay, and the popup didn't open (or the
-// background was still starting up). Switch to the previous tab straight away
+// This page can't show the overlay. Switch to the previous tab straight away
 // and let its overlay carry on the cycle: it sees the modifier come up like
-// any page does. When that tab can't show it either, the switcher opens in the
-// popup, or in its own window.
-async function cycleWithoutOverlay(tab, timing, { popupFailed = false } = {}) {
+// any page does. When that tab can't show it either, switch anyway, and let
+// presses that follow quickly step further back.
+//
+// Nothing outside a web page hears the modifier come up reliably: a popup or
+// window that opens while it's held misses the release (Firefox), or misses
+// it after the shortcut is pressed again (Chrome). So between these pages a
+// held cycle is told from separate taps by time.
+async function cycleWithoutOverlay(tab, timing) {
 	const [tabs, shortcut] = await Promise.all([snapshot(tab.id), switchShortcut()]);
 	const target = tabs[1];
 	if (!target) return;
 
 	if (RESTRICTED.test(target.url ?? "")) {
-		const start = { tabs, modifier: shortcut.modifier, switchCode: shortcut.code };
-		if (popupFailed) {
-			pendingSwitcher = start;
-			openSwitcherWindow(tab);
-		} else {
-			openSwitcher(tab, start);
-		}
+		blind = { tabs, index: 0, from: tab.id, at: 0 };
+		await stepBlind(1);
 		return;
 	}
 	jump = { from: tab.id, via: target.id };
@@ -535,12 +502,39 @@ async function cycleWithoutOverlay(tab, timing, { popupFailed = false } = {}) {
 	}
 }
 
-// The tab a cycle from this one goes to first, as far as the stack knows.
-function previousTab(tab) {
-	const id = stack.find(
-		(id) => id !== tab.id && tabInfo.has(id) && (!settings.thisWindowOnly || tabInfo.get(id).windowId === tab.windowId),
-	);
-	return tabInfo.get(id);
+// One press of a cycle with no overlay: switch to the next tab along, and keep
+// the tab the cycle started on second in the stack, as releasing would. A web
+// page takes the cycle over, with its overlay.
+async function stepBlind(index) {
+	const { tabs, from } = blind;
+	blind.index = index % tabs.length;
+	blind.at = Date.now();
+	const target = tabs[blind.index];
+	jump = null;
+	await activate(target.id, target.windowId);
+	if (target.id !== from) {
+		stack = [target.id, from, ...stack.filter((id) => id !== target.id && id !== from)];
+		save();
+	}
+	if (target.id === from || RESTRICTED.test(target.url ?? "")) return;
+
+	blind = null;
+	jump = { from, via: target.id };
+	const shortcut = await switchShortcut();
+	const message = {
+		type: "cycle",
+		tabs,
+		selected: tabs.indexOf(target),
+		modifier: shortcut.modifier,
+		switchCode: shortcut.code,
+		jumped: true,
+		timing: { commandAt: Date.now(), jumped: true },
+	};
+	try {
+		await api.tabs.sendMessage(target.id, message, { frameId: 0 });
+	} catch {
+		jump = null;
+	}
 }
 
 async function switcherStart(currentId) {
@@ -550,17 +544,17 @@ async function switcherStart(currentId) {
 
 // The toolbar popup opens much faster than a window. It's pointed at the
 // switcher only until the switcher connects; clicking the icon shows settings.
-function openSwitcher(tab, start, fallback = () => openSwitcherWindow(tab)) {
+function openSwitcher(tab, start) {
 	pendingSwitcher = start;
 	const action = api.action ?? api.browserAction;
 	if (!action.openPopup) {
-		fallback();
+		openSwitcherWindow(tab);
 		return;
 	}
 	action.setPopup({ popup: "switcher.html?popup" });
 	action.openPopup().catch(() => {
 		action.setPopup({ popup: "settings.html" });
-		fallback();
+		openSwitcherWindow(tab);
 	});
 }
 
@@ -675,7 +669,7 @@ api.runtime.onConnect.addListener((port) => {
 	(api.action ?? api.browserAction).setPopup({ popup: "settings.html" });
 	const start = pendingSwitcher;
 	pendingSwitcher = null;
-	switcherStarted = Promise.resolve(start)
+	Promise.resolve(start)
 		.then((s) => port.postMessage({ type: "start", ...s }))
 		.catch(() => {}); // closed before it started
 
@@ -692,12 +686,7 @@ api.runtime.onConnect.addListener((port) => {
 				// the window already closed itself
 			}
 		} else if (msg.type === "closeTab") {
-			const tabs = await closeTab(msg.tabId, msg.currentId);
-			try {
-				port.postMessage({ type: "more", tabs });
-			} catch {
-				// closed meanwhile
-			}
+			api.tabs.remove(msg.tabId).catch(() => {});
 		} else if (msg.type === "search") {
 			const [tabs, closed] = await Promise.all([snapshot(msg.currentId, { forSearch: true }), recentlyClosed()]);
 			port.postMessage({ type: "tabs", tabs, closed });
