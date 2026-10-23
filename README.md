@@ -14,7 +14,13 @@ Arc-style tab switching for Chrome and Firefox. Your tabs form a stack, most rec
 
 **Chrome:** go to `chrome://extensions`, turn on Developer mode, click "Load unpacked" and pick `src/`.
 
-**Firefox (128+):** run `node build.mjs`, then go to `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on" and pick `dist/firefox/manifest.json`. Rerun the build after changing `src/`.
+**Firefox (128+):** run `bun build.mjs`, then go to `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on" and pick `dist/firefox/manifest.json`. Rerun the build after changing `src/`.
+
+## Release
+
+1. Bump `version` in `src/manifest.json`. Both stores refuse an upload whose version they've already seen.
+2. Run `bun build.mjs`. Besides `dist/firefox/`, it writes `dist/tabstack-<version>-chrome.zip` for the Chrome Web Store and `dist/tabstack-<version>-firefox.zip` for addons.mozilla.org.
+3. Upload each zip. The listing text, permission justifications and reviewer notes are in `store/listing.md`, and the images are in `store/`.
 
 The Firefox build is Manifest V2. Under V3, Firefox only lets an extension capture a tab it was just invoked on, so thumbnails would only come from pressing the shortcut. V2's `<all_urls>` permission can capture any tab, even background ones.
 

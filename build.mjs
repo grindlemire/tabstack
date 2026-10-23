@@ -1,19 +1,28 @@
-// Builds the Firefox copy of the extension into dist/firefox. Chrome loads
-// src/ directly.
+// Builds the Firefox copy of the extension into dist/firefox, then zips both
+// browsers' packages for the stores. Chrome loads src/ directly.
 //
 // Firefox gets Manifest V2. Under V3 it only lets an extension capture a tab
 // it was invoked on (activeTab), however much host access it has, so
 // thumbnails would only ever come from pressing the shortcut. V2's <all_urls>
 // permission captures any tab, and even background ones (tabs.captureTab).
-// Usage: node build.mjs
+//
+// Usage: bun build.mjs (node build.mjs works too; it only uses built-ins)
+//   dist/firefox/                     unpacked Firefox build, for about:debugging
+//   dist/tabstack-<version>-chrome.zip   upload to the Chrome Web Store
+//   dist/tabstack-<version>-firefox.zip  upload to addons.mozilla.org
 
+import { execFileSync } from "node:child_process";
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const out = new URL("dist/firefox/", import.meta.url);
-const { host_permissions, action, background, permissions, ...rest } = JSON.parse(
-	readFileSync(new URL("src/manifest.json", import.meta.url)),
-);
+// Plain string paths: Bun hands cpSync's filter URL objects when given URLs.
+const root = fileURLToPath(new URL(".", import.meta.url));
+const dist = join(root, "dist");
+const src = join(root, "src");
+const firefox = join(dist, "firefox");
+const chromeManifest = JSON.parse(readFileSync(join(src, "manifest.json")));
+const { host_permissions, action, background, permissions, ...rest } = chromeManifest;
 
 const manifest = {
 	...rest,
@@ -32,10 +41,21 @@ const manifest = {
 	},
 };
 
-rmSync(out, { recursive: true, force: true });
-cpSync(new URL("src/", import.meta.url), out, {
+rmSync(dist, { recursive: true, force: true });
+cpSync(src, firefox, {
 	recursive: true,
 	filter: (path) => !basename(path).startsWith("."),
 });
-writeFileSync(new URL("manifest.json", out), JSON.stringify(manifest, null, 2) + "\n");
-console.log("built dist/firefox");
+writeFileSync(join(firefox, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+
+// Both stores want manifest.json at the root of the zip, so zip from inside
+// each folder. -X drops macOS extra attributes; dotfiles stay out.
+function zip(folder, name) {
+	execFileSync("zip", ["-r", "-X", "-q", join(dist, name), ".", "-x", ".*", "*/.*"], { cwd: folder });
+	return `dist/${name}`;
+}
+
+const { version } = chromeManifest;
+console.log(`built dist/firefox`);
+console.log(`built ${zip(src, `tabstack-${version}-chrome.zip`)}`);
+console.log(`built ${zip(firefox, `tabstack-${version}-firefox.zip`)}`);
