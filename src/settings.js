@@ -14,7 +14,7 @@ function note(text, error = false) {
 
 // Chrome reports "⌘J" on macOS already; Firefox reports "Command+J".
 function prettyCommand(shortcut) {
-	if (!shortcut) return "Not set";
+	if (!shortcut) return "";
 	if (!isMac) return shortcut;
 	return shortcut
 		.replace("MacCtrl+", "⌃")
@@ -45,6 +45,18 @@ function firefoxShortcut(s) {
 	if (s.ctrl) mods.push(isMac ? "MacCtrl" : "Ctrl");
 	if (s.shift) mods.push("Shift");
 	return [...mods, key].join("+");
+}
+
+// Each key of a shortcut gets its own keycap: "⇧⌘K" is ⇧ ⌘ K, and
+// "Ctrl+Shift+K" is Ctrl Shift K.
+function showKeys(el, shortcut) {
+	el.classList.toggle("missing", !shortcut);
+	if (!shortcut) {
+		el.textContent = "Not set";
+		return;
+	}
+	const keys = shortcut.includes("+") ? shortcut.split("+") : shortcut.match(/[⌃⌥⇧⌘]|[^⌃⌥⇧⌘]+/g);
+	el.replaceChildren(...keys.map((key) => Object.assign(document.createElement("kbd"), { textContent: key })));
 }
 
 // --- recording a shortcut ---
@@ -131,13 +143,12 @@ async function refresh() {
 	const s = await loadSettings();
 	const commands = await api.commands.getAll();
 	const switchKey = commands.find((c) => c.name === "switch")?.shortcut;
-	$("switch-key").textContent = prettyCommand(switchKey);
-	$("switch-key").classList.toggle("missing", !switchKey);
-	$("find-key").textContent = prettyCommand(commands.find((c) => c.name === "search")?.shortcut);
+	showKeys($("switch-key"), prettyCommand(switchKey));
+	showKeys($("find-key"), prettyCommand(commands.find((c) => c.name === "search")?.shortcut));
 	if (!switchKey && !recording && !$("note").textContent) {
 		note("Another extension or the browser already uses this shortcut. Choose a different one.", true);
 	}
-	$("search-key").textContent = format(s.searchShortcut);
+	showKeys($("search-key"), format(s.searchShortcut));
 	$("search-reset").hidden = JSON.stringify(s.searchShortcut) === JSON.stringify(DEFAULTS.searchShortcut);
 	$("auto-switch").checked = s.autoSwitch;
 	$("include-closed").checked = s.includeClosed;
