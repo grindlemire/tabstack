@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="170" viewBox="0 0 660 170" role="img" aria-labelledby="title desc">
+  <title id="title">How tabstack works</title>
+  <desc id="desc">The browser sends the shortcut to background.js, which holds the tab stack and thumbnails. background.js sends the tabs to content.js, which draws the overlay in the page. When Cmd comes up, content.js tells background.js which tab to switch to.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; fill: #768390; }
+    .name { font-size: 15px; font-weight: 600; text-anchor: middle; }
+    .what { font-size: 12px; text-anchor: middle; }
+    .label { font-size: 12px; text-anchor: middle; }
+    .box { fill: rgba(118, 131, 144, 0.12); stroke: rgba(118, 131, 144, 0.55); stroke-width: 1.5; }
+    .main { fill: rgba(74, 124, 247, 0.16); stroke: #4a7cf7; stroke-width: 2; }
+    .arrow { stroke: rgba(118, 131, 144, 0.8); stroke-width: 1.5; fill: none; }
+    .head { fill: rgba(118, 131, 144, 0.8); }
+  </style>
+
+  <!-- boxes -->
+  <rect class="box" x="1" y="40" width="150" height="72" rx="10"/>
+  <text class="name" x="76" y="71">Browser</text>
+  <text class="what" x="76" y="91">sends the shortcut</text>
+
+  <rect class="box" x="255" y="40" width="150" height="72" rx="10"/>
+  <text class="name" x="330" y="71">background.js</text>
+  <text class="what" x="330" y="91">tab stack, thumbnails</text>
+
+  <rect class="main" x="509" y="40" width="150" height="72" rx="10"/>
+  <text class="name" x="584" y="71">content.js</text>
+  <text class="what" x="584" y="91">overlay in the page</text>
+
+  <!-- browser to background -->
+  <text class="label" x="203" y="58">Cmd+J</text>
+  <line class="arrow" x1="151" y1="66" x2="246" y2="66"/>
+  <path class="head" d="M246 61 L255 66 L246 71 Z"/>
+
+  <!-- background to page -->
+  <text class="label" x="457" y="58">tabs</text>
+  <line class="arrow" x1="405" y1="66" x2="500" y2="66"/>
+  <path class="head" d="M500 61 L509 66 L500 71 Z"/>
+
+  <!-- page back to background when Cmd comes up -->
+  <line class="arrow" x1="509" y1="90" x2="414" y2="90"/>
+  <path class="head" d="M414 85 L405 90 L414 95 Z"/>
+  <text class="label" x="457" y="140">Cmd up:</text>
+  <text class="label" x="457" y="156">switch to this tab</text>
+  <line class="arrow" x1="457" y1="94" x2="457" y2="126" stroke-dasharray="2 3"/>
+</svg>
