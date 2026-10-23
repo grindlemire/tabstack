@@ -3,7 +3,8 @@
 globalThis.TabstackShared = (() => {
 	const api = globalThis.browser ?? globalThis.chrome;
 	const isMac = /Mac/.test(navigator.platform);
-	const isFirefox = typeof api.runtime.getBrowserInfo === "function";
+	// runtime.getBrowserInfo would tell, but page scripts don't get it
+	const isFirefox = navigator.userAgent.includes("Firefox/");
 
 	const DEFAULTS = {
 		searchShortcut: { code: "Slash", key: "/", meta: isMac, ctrl: !isMac, alt: false, shift: false },
