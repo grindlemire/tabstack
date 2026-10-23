@@ -26,7 +26,7 @@ tabstack keeps your tabs in the order you last used them and lets you move throu
 
 Tap Cmd+J (Ctrl+J on Windows and Linux) to jump back to the tab you were just on. Hold Cmd and press J again to go further back through your five most recent tabs, each shown as a thumbnail, then let go to switch. If you go one tab too far, Cmd+Shift+J steps forward again.
 
-Press Cmd+Shift+K (Ctrl+Shift+K on Windows and Linux) on any page to search every open tab by title or address. Search matches loosely, so "gpr" finds a GitHub pull request and the typo "rainer" still finds Mount Rainier. When only one tab matches, tabstack switches to it right away. Recently closed tabs show up below your open ones, and pressing Enter on one reopens it.
+Press Cmd+Shift+Space (Ctrl+Shift+Space on Windows and Linux) on any page to search every open tab by title or address. Search matches loosely, so "gpr" finds a GitHub pull request and the typo "rainer" still finds Mount Rainier. When only one tab matches, tabstack switches to it right away. Recently closed tabs show up below your open ones, and pressing Enter on one reopens it.
 
 While the switcher is open:
 - Backspace or X closes the selected tab
@@ -124,7 +124,7 @@ lending decisions.
 ### Summary
 
 ```
-Tap Cmd+J to jump back to your last tab, hold it to flip through your recent tabs with thumbnails the way Arc does, and press Cmd+Shift+K to search every open and recently closed tab.
+Tap Cmd+J to jump back to your last tab, hold it to flip through your recent tabs with thumbnails the way Arc does, and press Cmd+Shift+Space to search every open and recently closed tab.
 ```
 
 ### Description
@@ -134,7 +134,7 @@ tabstack keeps your tabs in the order you last used them and lets you move throu
 
 Tap Cmd+J (Ctrl+J on Windows and Linux) to jump back to the tab you were just on. Hold Cmd and press J again to go further back through your five most recent tabs, each shown as a thumbnail, then let go to switch. If you go one tab too far, Cmd+Shift+J steps forward again.
 
-Press Cmd+Shift+K (Ctrl+Shift+K on Windows and Linux) on any page to search every open tab by title or address. Search matches loosely, so "gpr" finds a GitHub pull request and the typo "rainer" still finds Mount Rainier. When only one tab matches, tabstack switches to it right away. Recently closed tabs show up below your open ones, and pressing Enter on one reopens it.
+Press Cmd+Shift+Space (Ctrl+Shift+Space on Windows and Linux) on any page to search every open tab by title or address. Search matches loosely, so "gpr" finds a GitHub pull request and the typo "rainer" still finds Mount Rainier. When only one tab matches, tabstack switches to it right away. Recently closed tabs show up below your open ones, and pressing Enter on one reopens it.
 
 While the switcher is open:
 - Backspace or X closes the selected tab
@@ -160,7 +160,7 @@ Firefox doesn't let extensions draw on its own pages, such as about: pages and t
 ```
 The source is plain JavaScript with no bundler or minifier. The Firefox package is built by build.mjs, which copies src/ and rewrites manifest.json for Firefox (Manifest V2, an event-page background, and the gecko id). It doesn't transform any code.
 
-To try it, open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the previous tab. Hold Cmd and press J repeatedly to cycle through recent tabs, and press Cmd+Shift+K to search.
+To try it, open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the previous tab. Hold Cmd and press J repeatedly to cycle through recent tabs, and press Cmd+Shift+Space to search.
 
 The extension uses Manifest V2 because under Manifest V3 Firefox only allows tabs.captureVisibleTab on a tab the extension was just invoked on (activeTab), even with host permissions granted. The thumbnails need captures of whichever tab the user is on, and captureTab for tabs that loaded in the background at startup.
 ```
