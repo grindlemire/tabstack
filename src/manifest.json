@@ -34,6 +34,13 @@
         "mac": "Command+J"
       },
       "description": "Switch to the last tab (hold the modifier and press again to go further back)"
+    },
+    "search": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+J",
+        "mac": "Command+Shift+J"
+      },
+      "description": "Search tabs (while switching, go forward a tab)"
     }
   },
   "content_scripts": [

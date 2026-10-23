@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 
 // Firefox lets an extension rebind its own commands. Chrome only allows it on
 // its shortcuts page.
-const canRebindSwitch = typeof api.commands.update === "function";
+const canRebindCommands = typeof api.commands.update === "function";
 
 function note(text, error = false) {
 	$("note").textContent = text;
@@ -90,20 +90,25 @@ addEventListener("keydown", async (e) => {
 	refresh();
 });
 
-$("switch-change").addEventListener("click", () => {
-	if (!canRebindSwitch) {
-		api.tabs.create({ url: "chrome://extensions/shortcuts" });
-		window.close();
-		return;
-	}
-	record($("switch-key"), async (s) => {
-		const shortcut = firefoxShortcut(s);
-		if (!shortcut) throw new Error("Firefox only allows letters, digits, F-keys, arrows, and a few others here.");
-		await api.commands.update({ name: "switch", shortcut });
-		api.runtime.sendMessage({ type: "checkShortcut" });
+// The switch and search shortcuts are the browser's commands.
+function bindCommand(name, id) {
+	$(`${id}-change`).addEventListener("click", () => {
+		if (!canRebindCommands) {
+			api.tabs.create({ url: "chrome://extensions/shortcuts" });
+			window.close();
+			return;
+		}
+		record($(`${id}-key`), async (s) => {
+			const shortcut = firefoxShortcut(s);
+			if (!shortcut) throw new Error("Firefox only allows letters, digits, F-keys, arrows, and a few others here.");
+			await api.commands.update({ name, shortcut });
+			api.runtime.sendMessage({ type: "checkShortcut" });
+		});
 	});
-});
-if (!canRebindSwitch) $("switch-change").title = "Opens Chrome's keyboard shortcuts page";
+	if (!canRebindCommands) $(`${id}-change`).title = "Opens Chrome's keyboard shortcuts page";
+}
+bindCommand("switch", "switch");
+bindCommand("search", "find");
 
 $("search-change").addEventListener("click", () =>
 	record($("search-key"), (s) => api.storage.sync.set({ searchShortcut: s })),
@@ -128,6 +133,7 @@ async function refresh() {
 	const switchKey = commands.find((c) => c.name === "switch")?.shortcut;
 	$("switch-key").textContent = prettyCommand(switchKey);
 	$("switch-key").classList.toggle("missing", !switchKey);
+	$("find-key").textContent = prettyCommand(commands.find((c) => c.name === "search")?.shortcut);
 	if (!switchKey && !recording && !$("note").textContent) {
 		note("Another extension or the browser already uses this shortcut. Choose a different one.", true);
 	}

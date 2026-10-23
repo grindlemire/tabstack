@@ -435,6 +435,10 @@ async function activate(tabId, windowId) {
 // --- the switch command ---
 
 api.commands.onCommand.addListener((command, tab) => {
+	if (command === "search") {
+		searchCommand(tab);
+		return;
+	}
 	if (command !== "switch") return;
 	const timing = { commandAt: Date.now(), swAgeMs: Math.round(performance.now()) };
 
@@ -458,6 +462,24 @@ api.commands.onCommand.addListener((command, tab) => {
 	if (tab && !overlayOpen.has(tab.id)) captureNow(tab);
 	commandQueue = commandQueue.then(() => cycle(tab, timing)).catch((e) => console.error("[tabstack]", e));
 });
+
+// The search shortcut is Shift with the switch key, so while a cycle is open
+// it keeps meaning "go forward a tab".
+function searchCommand(tab) {
+	if (switcherPort) {
+		switcherStarted.then(() => switcherPort?.postMessage({ type: "back" })).catch(() => {});
+		return;
+	}
+	if (!tab) return;
+	if (overlayOpen.has(tab.id)) {
+		api.tabs.sendMessage(tab.id, { type: "back" }, { frameId: 0 }).catch(() => {});
+		return;
+	}
+	const inPopup = () => openSwitcher(tab, switcherStart(tab.id).then((s) => ({ ...s, mode: "search" })));
+	// like the switch shortcut, decided before awaiting anything
+	if (RESTRICTED.test(tab.url ?? "")) inPopup();
+	else api.tabs.sendMessage(tab.id, { type: "search" }, { frameId: 0 }).catch(inPopup);
+}
 
 async function cycle(tab, timing) {
 	tab ??= (await api.tabs.query({ active: true, lastFocusedWindow: true }))[0];

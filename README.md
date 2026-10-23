@@ -3,7 +3,7 @@
 Arc-style tab switching for Chrome and Firefox. Your tabs form a stack, most recently used first.
 
 - **Cmd+J** (Ctrl+J elsewhere): a quick tap swaps to your last tab. Hold Cmd and press J again to go further back through your five most recent tabs (it wraps; older tabs are for search), **Cmd+Shift+J** to step forward again, then release Cmd to switch. Thumbnails of the stack appear if you hold for longer than 120 ms.
-- **Cmd+/**: search your tabs. Type to filter, Enter to switch. When only one tab matches, it switches automatically.
+- **Cmd+Shift+J**: search your tabs, from any page. **Cmd+/** also searches from a web page. Type to filter, Enter to switch. When only one tab matches, it switches automatically.
 - While the switcher is open:
   - **Backspace** or **X** closes the selected tab (**Cmd+Backspace** while searching).
   - The search key turns cycling into search.
@@ -37,7 +37,8 @@ Matched letters are highlighted, and tabs playing sound show a speaker. Recently
 ## Settings
 
 - **Switch shortcut:** in Firefox you record it right there. Chrome has no API for this, so the button opens `chrome://extensions/shortcuts`. Whichever modifier the shortcut uses is the one whose release ends a cycle.
-- **Search shortcut:** any combination with Cmd, Ctrl or Alt. tabstack handles this one itself rather than through the browser, so it only works while the page has keyboard focus.
+- **Search shortcut:** a browser shortcut like the switch one, set the same way. While the switcher is open it steps forward a tab instead.
+- **Search from a page:** any combination with Cmd, Ctrl or Alt. tabstack handles this one itself rather than through the browser, so it only works while a web page has keyboard focus.
 - **Switch when search finds one tab**, **include recently closed tabs in search**, **cycle through this window's tabs only** (search still covers every window), and **show timings**.
 
 ## Thumbnails

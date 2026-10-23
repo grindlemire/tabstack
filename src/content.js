@@ -212,6 +212,7 @@
 		if (msg.type === "cycle") onCycle(msg);
 		else if (msg.type === "modUp") onModUp(msg.key);
 		else if (msg.type === "search") openSearch();
+		else if (msg.type === "back" && switcher?.mode === "cycle") switcher.move(-1);
 		sendResponse({ ok: true });
 	}
 	api.runtime.onMessage.addListener(onMessage);

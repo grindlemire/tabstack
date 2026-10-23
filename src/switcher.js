@@ -50,9 +50,12 @@ port.onMessage.addListener(async (msg) => {
 		switcher.switchCode = msg.switchCode ?? null;
 		modifier = msg.modifier ?? modifier;
 		switcher.open("cycle", msg.tabs ?? []);
-		if (released) switcher.commit();
+		if (msg.mode === "search") openSearch();
+		else if (released) switcher.commit();
 	} else if (msg.type === "cycle") {
 		switcher.move(1);
+	} else if (msg.type === "back") {
+		if (switcher.mode === "cycle") switcher.move(-1);
 	} else if (msg.type === "more") {
 		switcher.addTabs(msg.tabs);
 	} else if (msg.type === "tabs") {
