@@ -1,7 +1,7 @@
 // Keeps the most-recently-used tab stack, captures thumbnails and favicons, and
 // routes the switch shortcut to the page overlay (content.js). On pages
 // extensions can't touch, it jumps to the previous tab and continues there, or
-// opens the switcher in its own window.
+// opens the switcher in the toolbar popup (or its own window, if that fails).
 
 // Chrome runs this as a service worker; Firefox lists shared.js before it.
 if (typeof importScripts === "function") importScripts("shared.js");
@@ -34,8 +34,11 @@ const iconsLoading = new Set();
 const overlayOpen = new Set(); // tab ids showing the switcher
 const captureTimers = new Map(); // window id -> timeout
 let lastCaptureAt = 0;
+const tabInfo = new Map(); // tab id -> { url, windowId }, so the shortcut can decide without waiting
+let started = false; // load() has finished
 let switcherPort = null;
-let pendingSwitcher = null; // what the switcher window that's opening shows
+let pendingSwitcher = null; // what the switcher that's opening shows: a value or a promise
+let switcherStarted = Promise.resolve(); // the open switcher has been sent its tabs
 let jump = null; // { from, via, to } while a cycle continues on the tab we jumped to
 let commandQueue = Promise.resolve();
 let settings = TabstackShared.DEFAULTS;
@@ -50,6 +53,7 @@ async function load() {
 	]);
 	settings = loaded;
 	const ids = new Set(tabs.map((t) => t.id));
+	for (const tab of tabs) noteTab(tab);
 
 	if (saved.stack) {
 		stack = saved.stack.filter((id) => ids.has(id));
@@ -70,6 +74,7 @@ async function load() {
 	await loadSaved(tabs.filter((t) => !thumbs.has(t.id)).map((t) => t.url));
 	if (api.tabs.captureTab) captureInBackground(tabs);
 	for (const tab of tabs) iconFor(tab); // fetch any that are missing
+	started = true;
 }
 
 onSettingsChange((s) => (settings = s));
@@ -89,8 +94,13 @@ function touch(tabId) {
 	save();
 }
 
+function noteTab(tab) {
+	tabInfo.set(tab.id, { url: tab.url ?? "", windowId: tab.windowId });
+}
+
 function forget(tabId) {
 	stack = stack.filter((id) => id !== tabId);
+	tabInfo.delete(tabId);
 	thumbs.delete(tabId);
 	overlayOpen.delete(tabId);
 	api.storage.session.remove(`thumb:${tabId}`);
@@ -126,7 +136,14 @@ api.tabs.onReplaced?.addListener(async (added, removed) => {
 	save();
 });
 
+api.tabs.onCreated.addListener(noteTab);
+api.tabs.onAttached.addListener((tabId, { newWindowId }) => {
+	const info = tabInfo.get(tabId);
+	if (info) info.windowId = newWindowId;
+});
+
 api.tabs.onUpdated.addListener(async (tabId, change, tab) => {
+	if (change.url) noteTab(tab);
 	if (!change.status && !change.favIconUrl && !change.url) return;
 	// a new favicon URL gets a new key, so iconFor() fetches it
 	await ready;
@@ -415,7 +432,18 @@ api.commands.onCommand.addListener((command, tab) => {
 	const timing = { commandAt: Date.now(), swAgeMs: Math.round(performance.now()) };
 
 	if (switcherPort) {
-		switcherPort.postMessage({ type: "cycle" });
+		switcherStarted.then(() => switcherPort?.postMessage({ type: "cycle" })).catch(() => {});
+		return;
+	}
+	// This page can't show the overlay, so the switcher opens in the toolbar
+	// popup. Firefox only opens it while the shortcut is still being handled,
+	// before anything is awaited, so decide from what's already known.
+	if (tab && started && RESTRICTED.test(tab.url ?? "") && previousTab(tab)) {
+		openSwitcher(tab, switcherStart(tab.id), () => {
+			commandQueue = commandQueue
+				.then(() => cycleWithoutOverlay(tab, timing, { popupFailed: true }))
+				.catch((e) => console.error("[tabstack]", e));
+		});
 		return;
 	}
 	// Capture the tab being left while it's still on screen: the freshest
@@ -446,17 +474,24 @@ async function cycle(tab, timing) {
 	await cycleWithoutOverlay(tab, timing);
 }
 
-// This page can't show the overlay. Switch to the previous tab straight away
+// This page can't show the overlay, and the popup didn't open (or the
+// background was still starting up). Switch to the previous tab straight away
 // and let its overlay carry on the cycle: it sees the modifier come up like
-// any page does. Only when that tab can't show it either does the switcher
-// open in its own window.
-async function cycleWithoutOverlay(tab, timing) {
+// any page does. When that tab can't show it either, the switcher opens in the
+// popup, or in its own window.
+async function cycleWithoutOverlay(tab, timing, { popupFailed = false } = {}) {
 	const [tabs, shortcut] = await Promise.all([snapshot(tab.id), switchShortcut()]);
 	const target = tabs[1];
 	if (!target) return;
 
 	if (RESTRICTED.test(target.url ?? "")) {
-		await openSwitcherWindow(tab, tabs, shortcut);
+		const start = { tabs, modifier: shortcut.modifier, switchCode: shortcut.code };
+		if (popupFailed) {
+			pendingSwitcher = start;
+			openSwitcherWindow(tab);
+		} else {
+			openSwitcher(tab, start);
+		}
 		return;
 	}
 	jump = { from: tab.id, via: target.id };
@@ -471,8 +506,36 @@ async function cycleWithoutOverlay(tab, timing) {
 	}
 }
 
-async function openSwitcherWindow(tab, tabs, shortcut) {
-	pendingSwitcher = { tabs, modifier: shortcut.modifier, switchCode: shortcut.code };
+// The tab a cycle from this one goes to first, as far as the stack knows.
+function previousTab(tab) {
+	const id = stack.find(
+		(id) => id !== tab.id && tabInfo.has(id) && (!settings.thisWindowOnly || tabInfo.get(id).windowId === tab.windowId),
+	);
+	return tabInfo.get(id);
+}
+
+async function switcherStart(currentId) {
+	const [tabs, shortcut] = await Promise.all([snapshot(currentId), switchShortcut()]);
+	return { tabs, modifier: shortcut.modifier, switchCode: shortcut.code };
+}
+
+// The toolbar popup opens much faster than a window. It's pointed at the
+// switcher only until the switcher connects; clicking the icon shows settings.
+function openSwitcher(tab, start, fallback = () => openSwitcherWindow(tab)) {
+	pendingSwitcher = start;
+	const action = api.action ?? api.browserAction;
+	if (!action.openPopup) {
+		fallback();
+		return;
+	}
+	action.setPopup({ popup: "switcher.html?popup" });
+	action.openPopup().catch(() => {
+		action.setPopup({ popup: "settings.html" });
+		fallback();
+	});
+}
+
+async function openSwitcherWindow(tab) {
 	const win = await api.windows.get(tab.windowId);
 	const width = 920;
 	const height = 240;
@@ -575,13 +638,17 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 	sendResponse({ ok: true });
 });
 
-// --- the switcher window ---
+// --- the switcher popup or window ---
 
 api.runtime.onConnect.addListener((port) => {
 	if (port.name !== "switcher") return;
 	switcherPort = port;
-	port.postMessage({ type: "start", ...pendingSwitcher });
+	(api.action ?? api.browserAction).setPopup({ popup: "settings.html" });
+	const start = pendingSwitcher;
 	pendingSwitcher = null;
+	switcherStarted = Promise.resolve(start)
+		.then((s) => port.postMessage({ type: "start", ...s }))
+		.catch(() => {}); // closed before it started
 
 	port.onDisconnect.addListener(() => {
 		if (switcherPort === port) switcherPort = null;

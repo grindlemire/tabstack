@@ -338,7 +338,8 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 	// --- the switcher ---
 
 	class Switcher {
-		constructor(root, { popover = false, onCommit, onCloseTab, onClose }) {
+		constructor(root, { popover = false, width = null, onCommit, onCloseTab, onClose }) {
+			this.width = width; // fixed room for the cards, where innerWidth isn't settled yet (a toolbar popup)
 			this.onCommit = onCommit;
 			this.onCloseTab = onCloseTab;
 			this.onClose = onClose;
@@ -503,7 +504,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 		// Cards shrink to fit narrow windows, and below a minimum width fewer
 		// of them show, so the panel never needs a scrollbar.
 		cardLayout() {
-			const room = innerWidth - PANEL_INSET;
+			const room = (this.width ?? innerWidth) - PANEL_INSET;
 			const count = Math.max(1, Math.min(CARDS, Math.floor((room + CARD_GAP) / (CARD_MIN + CARD_GAP))));
 			const width = Math.min(CARD_MAX, Math.floor((room - CARD_GAP * (count - 1)) / count));
 			return { count, width };

@@ -1,16 +1,27 @@
-// The switcher in its own window: the fallback when neither the current tab
-// nor the previous one can show the overlay (two chrome:// pages in a row).
-// The window has keyboard focus, so it sees the modifier come up.
+// The switcher outside a page: the fallback when neither the current tab nor
+// the previous one can show the overlay (two chrome:// pages in a row). It
+// opens in the toolbar popup (switcher.html?popup), or in its own window when
+// the popup won't open. Either has keyboard focus, so it sees the modifier
+// come up.
 
 const { api, loadSettings, matches } = TabstackShared;
 const MODIFIERS = { Meta: "metaKey", Control: "ctrlKey", Alt: "altKey", Shift: "shiftKey" };
+
+// A popup sizes itself to the page, so the page sets the size. Chrome caps
+// popups at 800x600.
+const POPUP_WIDTH = 800;
+const inPopup = new URLSearchParams(location.search).has("popup");
+if (inPopup) document.body.style.width = `${POPUP_WIDTH}px`;
 
 const port = api.runtime.connect({ name: "switcher" });
 let modifier = "Meta";
 let settings;
 let committing = false;
+let released = false; // the modifier came up before the tabs arrived
 
-const switcher = new TabstackUI.Switcher(document.getElementById("root").attachShadow({ mode: "open" }), {
+const shadow = document.getElementById("root").attachShadow({ mode: "open" });
+const switcher = new TabstackUI.Switcher(shadow, {
+	width: inPopup ? POPUP_WIDTH : null,
 	onCommit: (item) => {
 		committing = true;
 		port.postMessage(
@@ -28,6 +39,10 @@ const switcher = new TabstackUI.Switcher(document.getElementById("root").attachS
 	},
 });
 
+// The rows' height is tied to the viewport, which a popup doesn't have until
+// it has sized itself.
+if (inPopup) shadow.append(Object.assign(document.createElement("style"), { textContent: ".rows { max-height: 380px; }" }));
+
 port.onMessage.addListener(async (msg) => {
 	if (msg.type === "start") {
 		settings = await loadSettings();
@@ -35,6 +50,7 @@ port.onMessage.addListener(async (msg) => {
 		switcher.switchCode = msg.switchCode ?? null;
 		modifier = msg.modifier ?? modifier;
 		switcher.open("cycle", msg.tabs ?? []);
+		if (released) switcher.commit();
 	} else if (msg.type === "cycle") {
 		switcher.move(1);
 	} else if (msg.type === "tabs") {
@@ -61,7 +77,9 @@ addEventListener("keydown", (e) => {
 });
 
 addEventListener("keyup", (e) => {
-	if (e.key === modifier && switcher.mode === "cycle") switcher.commit();
+	if (e.key !== modifier) return;
+	if (switcher.mode === "cycle") switcher.commit();
+	else if (!switcher.isOpen) released = true;
 });
 
 // Recover from a missed keyup: pointer events carry the modifier state.
