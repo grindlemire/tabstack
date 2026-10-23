@@ -37,6 +37,8 @@ Matched letters are highlighted, and tabs playing sound show a speaker. Once you
 
 ### Settings
 
+<img src="store/screenshot-4-settings.png" width="640" alt="The settings popup, with the switch and search shortcuts drawn as keycaps above four switches">
+
 The toolbar popup has these settings:
 
 - **Switch tabs** and **Search tabs** are the browser shortcuts. Firefox lets you record a new one in the popup. Chrome has no API for rebinding them, so its Change button opens `chrome://extensions/shortcuts` instead. Whichever modifier the switch shortcut uses is the one whose release ends a cycle.
