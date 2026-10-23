@@ -29,7 +29,9 @@ const manifest = {
 	manifest_version: 2,
 	// Chrome's service worker pulls in shared.js with importScripts()
 	background: { scripts: ["shared.js", "background.js"], persistent: false },
-	browser_action: action,
+	// Firefox files new extensions under the puzzle-piece menu; put the icon
+	// on the toolbar so the red no-shortcut warning is visible
+	browser_action: { ...action, default_area: "navbar" },
 	// no _favicon service in Firefox, so no "favicon" permission
 	permissions: [...permissions.filter((p) => p !== "favicon"), ...host_permissions],
 	browser_specific_settings: {
