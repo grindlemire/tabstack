@@ -30,7 +30,7 @@ const switcher = new TabstackUI.Switcher(shadow, {
 				: { type: "activate", tabId: item.id, windowId: item.windowId },
 		);
 	},
-	onCloseTab: (tab) => port.postMessage({ type: "closeTab", tabId: tab.id }),
+	onCloseTab: (tab) => port.postMessage({ type: "closeTab", tabId: tab.id, currentId: switcher.tabs[0]?.id }),
 	onClose: () => {
 		// after a commit, wait for the background to confirm (or give up) so
 		// closing doesn't drop the message
@@ -53,6 +53,8 @@ port.onMessage.addListener(async (msg) => {
 		if (released) switcher.commit();
 	} else if (msg.type === "cycle") {
 		switcher.move(1);
+	} else if (msg.type === "more") {
+		switcher.addTabs(msg.tabs);
 	} else if (msg.type === "tabs") {
 		switcher.setTabs(msg.tabs, msg.closed);
 	} else if (msg.type === "done") {

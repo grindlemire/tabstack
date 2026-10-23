@@ -421,6 +421,13 @@ async function recentlyClosed() {
 		}));
 }
 
+// Closes a tab from the switcher, and returns the tabs it can now cycle
+// through, so the one below the closed tab can take its place.
+async function closeTab(tabId, currentId) {
+	await api.tabs.remove(tabId).catch(() => {});
+	return currentId == null ? [] : snapshot(currentId);
+}
+
 async function activate(tabId, windowId) {
 	await Promise.all([api.tabs.update(tabId, { active: true }), api.windows.update(windowId, { focused: true })]);
 }
@@ -618,8 +625,8 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 			api.sessions.restore(msg.sessionId);
 			break;
 		case "closeTab":
-			api.tabs.remove(msg.tabId).catch(() => {});
-			break;
+			closeTab(msg.tabId, tabId).then((tabs) => sendResponse({ tabs }));
+			return true;
 		case "open":
 			overlayOpen.add(tabId);
 			break;
@@ -663,7 +670,12 @@ api.runtime.onConnect.addListener((port) => {
 				// the window already closed itself
 			}
 		} else if (msg.type === "closeTab") {
-			api.tabs.remove(msg.tabId).catch(() => {});
+			const tabs = await closeTab(msg.tabId, msg.currentId);
+			try {
+				port.postMessage({ type: "more", tabs });
+			} catch {
+				// closed meanwhile
+			}
 		} else if (msg.type === "search") {
 			const [tabs, closed] = await Promise.all([snapshot(msg.currentId, { forSearch: true }), recentlyClosed()]);
 			port.postMessage({ type: "tabs", tabs, closed });

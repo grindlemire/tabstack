@@ -353,6 +353,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.selected = 0;
 			this.drawn = null; // what render() last drew, so select() can patch it
 			this.rowNodes = [];
+			this.removed = new Set(); // tabs closed from the switcher, which a refill mustn't bring back
 
 			// Constructed sheets aren't subject to the page's style-src CSP;
 			// the <style> element covers browsers where adopting one fails.
@@ -383,6 +384,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.mode = mode;
 			this.input.value = "";
 			this.debug.textContent = "";
+			this.removed.clear();
 			// the ring shouldn't slide over from where the last session left it
 			this.ring.classList.add("instant");
 			requestAnimationFrame(() => this.ring.classList.remove("instant"));
@@ -458,10 +460,24 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 		closeSelected() {
 			const item = this.items()[this.selected];
 			if (!item || item.closed || item.id === this.tabs[0]?.id) return;
-			this.onCloseTab(item);
+			this.removed.add(item.id);
+			// the background answers with the tabs now on top, to fill the gap
+			Promise.resolve(this.onCloseTab(item)).then((reply) => reply?.tabs && this.addTabs(reply.tabs));
 			this.tabs = this.tabs.filter((t) => t.id !== item.id);
 			if (this.mode === "search") this.filter({ keepSelection: true });
 			else this.select(Math.min(this.selected, this.items().length - 1));
+		}
+
+		// Cycling only gets the few most recent tabs, so closing one leaves a
+		// gap; the next tab down moves into it.
+		addTabs(tabs) {
+			if (!this.isOpen || this.mode !== "cycle") return;
+			const have = new Set(this.tabs.map((t) => t.id));
+			const extra = tabs.filter((t) => !have.has(t.id) && !this.removed.has(t.id));
+			if (!extra.length) return;
+			for (const tab of extra) if (tab.thumb) bitmapFor(`${tab.id}:${tab.thumb.length}`, tab.thumb);
+			this.tabs = [...this.tabs, ...extra];
+			this.select(this.selected);
 		}
 
 		close() {
