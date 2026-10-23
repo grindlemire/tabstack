@@ -54,11 +54,13 @@ globalThis.TabstackUI = (() => {
 @starting-style {
 	.panel[popover]:popover-open { opacity: 0; transform: scale(0.96); }
 }
-.panel.docked { border: 0; border-radius: 0; box-shadow: none; }
+.panel.docked { border: 0; border-radius: 0; box-shadow: none; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .panel:not(.searching) .search,
 .panel:not(.searching) .rows,
 .panel.searching .cards { display: none; }
 .panel.searching { width: 560px; max-width: calc(100vw - 32px); }
+/* the popup and the window are already the panel's size */
+.panel.docked.searching { width: auto; max-width: none; }
 
 .cards { position: relative; display: flex; gap: 8px; }
 .card { position: relative; z-index: 1; box-sizing: border-box; width: var(--card-w, 172px); padding: 6px; border-radius: 10px; }
@@ -338,8 +340,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 	// --- the switcher ---
 
 	class Switcher {
-		constructor(root, { popover = false, width = null, onCommit, onCloseTab, onClose }) {
-			this.width = width; // fixed room for the cards, where innerWidth isn't settled yet (a toolbar popup)
+		constructor(root, { popover = false, onCommit, onCloseTab, onClose }) {
 			this.onCommit = onCommit;
 			this.onCloseTab = onCloseTab;
 			this.onClose = onClose;
@@ -520,7 +521,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 		// Cards shrink to fit narrow windows, and below a minimum width fewer
 		// of them show, so the panel never needs a scrollbar.
 		cardLayout() {
-			const room = (this.width ?? innerWidth) - PANEL_INSET;
+			const room = innerWidth - PANEL_INSET;
 			const count = Math.max(1, Math.min(CARDS, Math.floor((room + CARD_GAP) / (CARD_MIN + CARD_GAP))));
 			const width = Math.min(CARD_MAX, Math.floor((room - CARD_GAP * (count - 1)) / count));
 			return { count, width };

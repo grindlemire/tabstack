@@ -560,8 +560,9 @@ function openSwitcher(tab, start) {
 
 async function openSwitcherWindow(tab) {
 	const win = await api.windows.get(tab.windowId);
-	const width = 920;
-	const height = 240;
+	// room for the search box and about ten rows
+	const width = 560;
+	const height = 480;
 	await api.windows.create({
 		url: "switcher.html",
 		type: "popup",

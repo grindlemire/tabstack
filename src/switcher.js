@@ -8,18 +8,16 @@
 
 const { api, loadSettings } = TabstackShared;
 
-// A popup sizes itself to the page, so the page sets the size. Chrome caps
-// popups at 800x600.
-const POPUP_WIDTH = 800;
+// A popup sizes itself to the page, so the page sets the width, the same
+// as the search panel's on web pages.
 const inPopup = new URLSearchParams(location.search).has("popup");
-if (inPopup) document.body.style.width = `${POPUP_WIDTH}px`;
+if (inPopup) document.body.style.width = "560px";
 
 const port = api.runtime.connect({ name: "switcher" });
 let committing = false;
 
 const shadow = document.getElementById("root").attachShadow({ mode: "open" });
 const switcher = new TabstackUI.Switcher(shadow, {
-	width: inPopup ? POPUP_WIDTH : null,
 	onCommit: (item) => {
 		committing = true;
 		port.postMessage(

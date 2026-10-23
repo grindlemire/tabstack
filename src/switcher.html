@@ -4,7 +4,12 @@
 		<meta charset="utf-8" />
 		<title>tabstack</title>
 		<style>
-			body { margin: 0; background: Canvas; }
+			/* the panel's colors, so the space below it matches */
+			:root { color-scheme: light dark; }
+			body { margin: 0; background: #fafafc; }
+			@media (prefers-color-scheme: dark) {
+				body { background: #1e1e20; }
+			}
 		</style>
 	</head>
 	<body>
