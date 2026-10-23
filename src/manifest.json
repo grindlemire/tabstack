@@ -1,0 +1,69 @@
+{
+  "manifest_version": 3,
+  "name": "tabstack: recent tab switcher",
+  "short_name": "tabstack",
+  "version": "0.1.0",
+  "description": "Switch between your most recently used tabs with thumbnails, like Arc. Hold Cmd+J to cycle, Cmd+/ to search.",
+  "permissions": [
+    "tabs",
+    "storage",
+    "scripting",
+    "favicon",
+    "sessions",
+    "alarms",
+    "idle"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "tabstack",
+    "default_popup": "settings.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "commands": {
+    "switch": {
+      "suggested_key": {
+        "default": "Ctrl+J",
+        "mac": "Command+J"
+      },
+      "description": "Switch to the last tab (hold the modifier and press again to go further back)"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "shared.js",
+        "ui.js",
+        "content.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "relay.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "homepage_url": "https://tabstack.alethi.dev"
+}
