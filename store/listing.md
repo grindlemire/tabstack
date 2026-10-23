@@ -12,7 +12,7 @@ in `src/manifest.json` rather than here.
 - **Name:** from the manifest, "tabstack: recent tab switcher"
 - **Homepage:** https://tabstack.alethi.dev
 - **Privacy policy:** https://tabstack.alethi.dev/privacy
-- **Support email:** [SUPPORT EMAIL]
+- **Support email:** support@alethi.dev
 - **Images:** `store/screenshot-1-cycle.png` through `screenshot-4-settings.png` (1280x800), and `store/promo-tile-440x280.png` for Chrome
 
 ## Chrome Web Store
@@ -99,11 +99,16 @@ The switcher is drawn over the page the user is on, which needs a content script
 
 ### Data usage
 
-tabstack stores tab titles, addresses and screenshots on the user's
-computer and doesn't send them anywhere, so no category applies if Chrome
-counts data as collected only when it leaves the device. If its reviewers
-read local storage as collecting, tick "Web history" and "Website content"
-instead, and have the privacy policy say both stay on the computer.
+Chrome counts data an extension keeps on the user's computer, even when it
+never leaves it, so tick these two:
+
+- **Web history:** the stack of tab titles and addresses, and recently
+  closed tabs
+- **Website content:** the screenshots used for thumbnails
+
+Leave "User activity" unticked. tabstack watches for its own shortcut keys
+and the modifier release but doesn't record keystrokes or clicks. The privacy
+policy should say both kinds of data stay on the computer.
 
 Tick all three certifications. tabstack doesn't sell data, doesn't use it
 for anything besides switching tabs, and doesn't use it for credit or
@@ -113,7 +118,7 @@ lending decisions.
 
 **Add-on URL:** `tabstack-switcher` (the `tabstack` address is taken)
 **Category:** Tabs
-**License:** [LICENSE: pick one before submitting]
+**License:** MIT
 **Platforms:** Firefox only, not Firefox for Android
 
 ### Summary

@@ -63,3 +63,7 @@ Matched letters are highlighted, and tabs playing sound show a speaker. Recently
 1. **Cmd+Shift+J in Firefox.** On macOS it is also Firefox's Browser Console shortcut, and the page may not be able to stop it.
 2. **Cold worker latency (Chrome).** Turn on "Show timings", stop the worker at `chrome://serviceworker-internals`, then hold Cmd+J.
 3. **Two `chrome://` pages in a row.** The window fallback should appear centered, end the cycle when you release Cmd, and close when you click away.
+
+## License
+
+MIT, see `LICENSE`.
