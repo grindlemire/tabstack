@@ -9,7 +9,7 @@ tabstack is an Arc-style recent-tab switcher for Chrome and Firefox, and for Zen
 Shortcuts are given for macOS. On Windows and Linux, Ctrl takes the place of Cmd.
 
 - **Cmd+J** switches to the last tab you used. Hold Cmd and keep pressing J to go further back through your five most recent tabs (fewer in a narrow window), then let go of Cmd to switch to the selected one. The cards only appear once you've held Cmd for 120 ms, so a quick tap switches without drawing anything. Cmd+Shift+J steps forward again, the selection wraps around at the end, and older tabs are reached through search.
-- **Cmd+Shift+Space** searches your tabs from any page. It's a placeholder default, so you may want to change it in the settings. **Cmd+/** also searches, but only while a web page has focus, because tabstack listens for it inside the page instead of through the browser. Type to filter and press Enter to switch. When exactly one open tab matches, tabstack switches to it after a short pause.
+- **Cmd+Shift+K** searches your tabs from any page. **Cmd+/** also searches, but only while a web page has focus, because tabstack listens for it inside the page instead of through the browser. Type to filter and press Enter to switch. When exactly one open tab matches, tabstack switches to it after a short pause.
 - **The toolbar icon** opens the settings. It turns red when the switch shortcut isn't set, which happens when another extension already has Cmd+J.
 
 <img src="docs/cycle.svg" width="660" alt="A cycle through five tabs. Holding Cmd and pressing J selects B, pressing J again selects C, and letting go of Cmd switches to C, which moves to the top of the stack with A second.">
@@ -40,7 +40,7 @@ Matched letters are highlighted, and tabs playing sound show a speaker. Once you
 The toolbar popup has these settings:
 
 - **Switch tabs** and **Search tabs** are the browser shortcuts. Firefox lets you record a new one in the popup. Chrome has no API for rebinding them, so its Change button opens `chrome://extensions/shortcuts` instead. Whichever modifier the switch shortcut uses is the one whose release ends a cycle.
-- **Search from a page** is the in-page shortcut, Cmd+/ by default.
+- **Also search with** is a second search shortcut, Cmd+/ by default. It only works on web pages, because tabstack listens for it inside the page.
 - **Switch when search finds one tab**, **Include recently closed tabs in search**, **Cycle through this window's tabs only** (search still covers every window) and **Show timings**, which prints latency numbers under the switcher.
 
 A shortcut you record in the popup has to include Cmd, Ctrl or Alt, so it doesn't fire while you type.
@@ -62,7 +62,7 @@ The browser's commands API tells an extension when a shortcut is pressed, but ne
 
 ```mermaid
 flowchart TB
-    keys(["Browser shortcuts<br/>Cmd+J, Cmd+Shift+Space"])
+    keys(["Browser shortcuts<br/>Cmd+J, Cmd+Shift+K"])
 
     subgraph page ["Each web page"]
         relay["relay.js<br/>every iframe"]
@@ -145,7 +145,8 @@ Then go to `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on
 
 1. **Cmd+Shift+J in Firefox.** On macOS it's also Firefox's Browser Console shortcut, and the page may not be able to stop it.
 2. **Cold worker latency in Chrome.** Turn on Show timings, stop the worker at `chrome://serviceworker-internals`, then hold Cmd+J.
-3. **Two `chrome://` pages in a row.** Separate taps should flip between them, and quick presses with Cmd held should step further back.
+3. **Cmd+Shift+K in both browsers.** Check that the browser lets tabstack have it: the Search tabs row in settings should show ⇧⌘K, not "Not set". On Windows and Linux, Firefox uses Ctrl+Shift+K for its Web Console.
+4. **Two `chrome://` pages in a row.** Separate taps should flip between them, and quick presses with Cmd held should step further back.
 
 ## License
 

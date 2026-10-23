@@ -3,7 +3,7 @@
   "name": "tabstack: recent tab switcher",
   "short_name": "tabstack",
   "version": "1.0.0",
-  "description": "Tap Cmd+J to jump back to your last tab, hold it to flip through recent tabs with thumbnails like Arc, and search with Cmd+/.",
+  "description": "Tap Cmd+J to jump back to your last tab, hold it to flip through recent tabs with thumbnails like Arc, and search with Cmd+Shift+K.",
   "permissions": [
     "tabs",
     "storage",
@@ -37,8 +37,8 @@
     },
     "search": {
       "suggested_key": {
-        "default": "Ctrl+Shift+Space",
-        "mac": "Command+Shift+Space"
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
       },
       "description": "Search tabs"
     }
