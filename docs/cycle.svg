@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="300" viewBox="0 0 660 300" role="img" aria-labelledby="title desc">
+  <title id="title">How a cycle works</title>
+  <desc id="desc">Five tabs, A to E, most recent first, with A the tab you're on. Holding Cmd and pressing J selects B. Pressing J again selects C. Letting go of Cmd switches to C, and the stack becomes C, A, B, D, E.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; fill: #768390; }
+    .step { font-size: 15px; font-weight: 600; }
+    .note { font-size: 13px; }
+    .axis { font-size: 12px; }
+    .letter { font-size: 20px; font-weight: 600; text-anchor: middle; }
+    .card { fill: rgba(118, 131, 144, 0.12); stroke: rgba(118, 131, 144, 0.55); stroke-width: 1.5; }
+    .selected { fill: rgba(74, 124, 247, 0.16); stroke: #4a7cf7; stroke-width: 3; }
+    .selected-letter { fill: #4a7cf7; }
+    .active { fill: #4a7cf7; stroke: #4a7cf7; stroke-width: 3; }
+    .active-letter { fill: #ffffff; }
+    .rule { stroke: rgba(118, 131, 144, 0.4); stroke-width: 1.5; }
+  </style>
+
+  <!-- axis over the cards -->
+  <text class="axis" x="280" y="22">most recent</text>
+  <text class="axis" x="648" y="22" text-anchor="end">older</text>
+  <line class="rule" x1="356" y1="18" x2="578" y2="18"/>
+  <path d="M578 13 L588 18 L578 23 Z" fill="rgba(118, 131, 144, 0.7)"/>
+
+  <!-- step 1: hold Cmd, press J -->
+  <text class="step" x="0" y="64">Hold Cmd, press J</text>
+  <text class="note" x="0" y="84">B, the previous tab, is selected</text>
+  <rect class="card" x="280" y="44" width="64" height="48" rx="8"/>
+  <text class="letter" x="312" y="75">A</text>
+  <rect class="selected" x="352" y="44" width="64" height="48" rx="8"/>
+  <text class="letter selected-letter" x="384" y="75">B</text>
+  <rect class="card" x="424" y="44" width="64" height="48" rx="8"/>
+  <text class="letter" x="456" y="75">C</text>
+  <rect class="card" x="496" y="44" width="64" height="48" rx="8"/>
+  <text class="letter" x="528" y="75">D</text>
+  <rect class="card" x="568" y="44" width="64" height="48" rx="8"/>
+  <text class="letter" x="600" y="75">E</text>
+
+  <!-- step 2: press J again -->
+  <text class="step" x="0" y="144">Press J again</text>
+  <text class="note" x="0" y="164">Cmd+Shift+J goes the other way</text>
+  <rect class="card" x="280" y="124" width="64" height="48" rx="8"/>
+  <text class="letter" x="312" y="155">A</text>
+  <rect class="card" x="352" y="124" width="64" height="48" rx="8"/>
+  <text class="letter" x="384" y="155">B</text>
+  <rect class="selected" x="424" y="124" width="64" height="48" rx="8"/>
+  <text class="letter selected-letter" x="456" y="155">C</text>
+  <rect class="card" x="496" y="124" width="64" height="48" rx="8"/>
+  <text class="letter" x="528" y="155">D</text>
+  <rect class="card" x="568" y="124" width="64" height="48" rx="8"/>
+  <text class="letter" x="600" y="155">E</text>
+
+  <line class="rule" x1="0" y1="200" x2="648" y2="200" stroke-dasharray="4 5"/>
+
+  <!-- step 3: let go -->
+  <text class="step" x="0" y="244">Let go of Cmd</text>
+  <text class="note" x="0" y="264">C moves to the top, A is next</text>
+  <rect class="active" x="280" y="224" width="64" height="48" rx="8"/>
+  <text class="letter active-letter" x="312" y="255">C</text>
+  <rect class="card" x="352" y="224" width="64" height="48" rx="8"/>
+  <text class="letter" x="384" y="255">A</text>
+  <rect class="card" x="424" y="224" width="64" height="48" rx="8"/>
+  <text class="letter" x="456" y="255">B</text>
+  <rect class="card" x="496" y="224" width="64" height="48" rx="8"/>
+  <text class="letter" x="528" y="255">D</text>
+  <rect class="card" x="568" y="224" width="64" height="48" rx="8"/>
+  <text class="letter" x="600" y="255">E</text>
+</svg>
