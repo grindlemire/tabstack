@@ -22,7 +22,7 @@ const dist = join(root, "dist");
 const src = join(root, "src");
 const firefox = join(dist, "firefox");
 const chromeManifest = JSON.parse(readFileSync(join(src, "manifest.json")));
-const { host_permissions, action, background, permissions, ...rest } = chromeManifest;
+const { host_permissions, action, background, permissions, optional_permissions, commands, ...rest } = chromeManifest;
 
 const manifest = {
 	...rest,
@@ -34,6 +34,9 @@ const manifest = {
 	browser_action: { ...action, default_area: "navbar" },
 	// no _favicon service in Firefox, so no "favicon" permission
 	permissions: [...permissions.filter((p) => p !== "favicon"), ...host_permissions],
+	// working across profiles (profiles.js, and the helper's optional
+	// permissions) is Chrome only for now
+	commands: Object.fromEntries(Object.entries(commands).filter(([name]) => !name.startsWith("profile-"))),
 	browser_specific_settings: {
 		gecko: {
 			id: "tabstack@alethi.dev",
@@ -43,10 +46,12 @@ const manifest = {
 	},
 };
 
+const CHROME_ONLY = ["profiles.js", "setup.html", "setup.js"];
+
 rmSync(dist, { recursive: true, force: true });
 cpSync(src, firefox, {
 	recursive: true,
-	filter: (path) => !basename(path).startsWith("."),
+	filter: (path) => !basename(path).startsWith(".") && !CHROME_ONLY.includes(basename(path)),
 });
 writeFileSync(join(firefox, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 

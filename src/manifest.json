@@ -13,6 +13,10 @@
     "alarms",
     "idle"
   ],
+  "optional_permissions": [
+    "nativeMessaging",
+    "contextMenus"
+  ],
   "host_permissions": [
     "<all_urls>"
   ],
@@ -41,6 +45,18 @@
         "mac": "Command+Shift+Space"
       },
       "description": "Search tabs"
+    },
+    "profile-next": {
+      "suggested_key": {
+        "mac": "MacCtrl+Command+Right"
+      },
+      "description": "Switch to the next profile (with the profile helper)"
+    },
+    "profile-prev": {
+      "suggested_key": {
+        "mac": "MacCtrl+Command+Left"
+      },
+      "description": "Switch to the previous profile (with the profile helper)"
     }
   },
   "content_scripts": [
