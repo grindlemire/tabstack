@@ -13,11 +13,17 @@ in `src/manifest.json` rather than here.
 - **Homepage:** https://tabstack.alethi.dev
 - **Privacy policy:** https://tabstack.alethi.dev/privacy
 - **Support email:** support@alethi.dev
-- **Images:** `store/screenshot-1-cycle.png` through `screenshot-4-settings.png` (1280x800), and `store/promo-tile-440x280.png` for Chrome
+- **Support URL:** https://github.com/grindlemire/tabstack/issues
+- **Images:** `store/screenshot-1-cycle.png` through `screenshot-4-settings.png` (1280x800)
 
 ## Chrome Web Store
 
 **Category:** Productivity, then Tools
+**Language:** English
+**Store icon:** `src/icons/icon-128.png`
+**Small promo tile:** `store/promo-tile-440x280.png`
+**Marquee promo tile, promo video, official URL:** none
+**Distribution:** free, public, all regions
 
 ### Description
 
@@ -42,7 +48,7 @@ Click the toolbar icon to:
 - cycle through the current window's tabs only
 
 Privacy
-tabstack doesn't connect to any server. Your settings, tab order and thumbnails stay in the browser's extension storage on your computer, and there's no account or analytics.
+tabstack has no servers of its own and never sends your tabs, history or settings anywhere. Your settings, tab order and thumbnails stay in the browser's extension storage on your computer, and there's no account or analytics.
 
 Chrome doesn't let extensions draw on its own pages, such as settings, the new tab page and the Web Store. On those pages Cmd+J switches straight to your previous tab and the switcher opens there instead.
 ```
@@ -95,7 +101,8 @@ Pauses the thumbnail refresh while the user is away from the computer, so the ex
 The switcher is drawn over the page the user is on, which needs a content script on every site, since the user can press the shortcut anywhere. Capturing a thumbnail of the visible tab with tabs.captureVisibleTab also requires access to that page. Nothing is read from the page beyond the screenshot used for the thumbnail, and nothing leaves the user's computer.
 ```
 
-**Remote code:** No. Every script ships in the package.
+**Remote code:** "No, I am not using remote code." Every script ships in the
+package.
 
 ### Data usage
 
@@ -113,6 +120,12 @@ policy should say both kinds of data stay on the computer.
 Tick all three certifications. tabstack doesn't sell data, doesn't use it
 for anything besides switching tabs, and doesn't use it for credit or
 lending decisions.
+
+### Test instructions
+
+```
+Open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the previous tab. Hold Cmd and press J repeatedly to cycle through recent tabs, and press Cmd+Shift+Space to search. No account or login is needed.
+```
 
 ## addons.mozilla.org
 
@@ -150,7 +163,7 @@ Click the toolbar icon to:
 - cycle through the current window's tabs only
 
 Privacy
-tabstack doesn't connect to any server. Your settings, tab order and thumbnails stay in the browser's extension storage on your computer, and there's no account or analytics.
+tabstack has no servers of its own and never sends your tabs, history or settings anywhere. Your settings, tab order and thumbnails stay in the browser's extension storage on your computer, and there's no account or analytics.
 
 Firefox doesn't let extensions draw on its own pages, such as about: pages and this site. On those pages Cmd+J switches straight to your previous tab and the switcher opens there instead.
 ```
@@ -158,7 +171,7 @@ Firefox doesn't let extensions draw on its own pages, such as about: pages and t
 ### Notes for reviewers
 
 ```
-The source is plain JavaScript with no bundler or minifier. The Firefox package is built by build.mjs, which copies src/ and rewrites manifest.json for Firefox (Manifest V2, an event-page background, and the gecko id). It doesn't transform any code.
+The source is plain JavaScript with no bundler or minifier. The Firefox package is built by build.mjs, which copies src/ and rewrites manifest.json for Firefox (Manifest V2, an event-page background, and the gecko id). It doesn't transform any code. Source: https://github.com/grindlemire/tabstack
 
 To try it, open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the previous tab. Hold Cmd and press J repeatedly to cycle through recent tabs, and press Cmd+Shift+Space to search.
 
