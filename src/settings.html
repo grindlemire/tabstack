@@ -288,6 +288,10 @@
 					<input type="checkbox" data-shared="searchAll" />
 				</label>
 				<label class="row">
+					<span class="label">Find profiles by name in search<small>Type a profile's name to switch to it</small></span>
+					<input type="checkbox" data-shared="searchProfiles" />
+				</label>
+				<label class="row">
 					<span class="label">Keep profile windows stacked<small>Each profile's window sits in the same place, so the one in front hides the rest</small></span>
 					<input type="checkbox" data-shared="stack" />
 				</label>
@@ -308,7 +312,7 @@
 		</section>
 
 		<div class="ad" id="profiles-ad" hidden>
-			<span class="label"><strong>Use more than one Chrome profile?</strong>Switch between them, search all their tabs, and open links in the right one.</span>
+			<span class="label"><strong id="profiles-ad-title">Use more than one Chrome profile?</strong><span id="profiles-ad-text">Switch between them, search all their tabs, and open links in the right one.</span></span>
 			<button id="profiles-learn">Learn more</button>
 			<button id="profiles-ad-hide" aria-label="Hide" title="Don't show this again">✕</button>
 		</div>

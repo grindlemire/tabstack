@@ -172,8 +172,17 @@ async function refreshProfiles() {
 	if (isFirefox) return;
 	const status = await api.runtime.sendMessage({ type: "profiles" }).catch(() => null);
 	if (!status || !("granted" in status)) return;
-	const { profilesAdHidden } = await api.storage.sync.get("profilesAdHidden");
+	const [{ profilesAdHidden }, { profileId }] = await Promise.all([
+		api.storage.sync.get("profilesAdHidden"),
+		api.storage.local.get("profileId"),
+	]);
 	$("profiles-ad").hidden = status.granted || !!profilesAdHidden;
+	// set up once and turned off since (here, or by tabstack-host uninstall)
+	if (profileId) {
+		$("profiles-ad-title").textContent = "Profile features are off";
+		$("profiles-ad-text").textContent = "Turn them back on to switch, search and open links across your profiles.";
+		$("profiles-learn").textContent = "Turn back on";
+	}
 	$("profiles").hidden = !status.granted;
 	if (!status.granted) return;
 
@@ -234,7 +243,8 @@ $("profile-keys-change").addEventListener("click", () => {
 });
 $("profiles-off").addEventListener("click", async () => {
 	await api.permissions.remove(PERMISSIONS);
-	await api.storage.sync.set({ profilesAdHidden: true });
+	// the offer comes back, to turn them on again from here
+	await api.storage.sync.set({ profilesAdHidden: false });
 	refreshProfiles();
 });
 

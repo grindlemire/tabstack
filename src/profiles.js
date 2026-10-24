@@ -22,7 +22,7 @@ globalThis.TabstackProfiles = (() => {
 	const RESTART_GAP = 60_000; // ms; restarting to connect is tried once, not in a loop
 
 	// Settings every profile shares. Each keeps a copy, and the newest wins.
-	const SHARED_DEFAULTS = { searchAll: true, stack: true, dupes: true, route: true };
+	const SHARED_DEFAULTS = { searchAll: true, searchProfiles: true, stack: true, dupes: true, route: true };
 
 	let hooks = null; // { snapshot, recentlyClosed } from background.js
 	let port = null;
@@ -240,8 +240,9 @@ globalThis.TabstackProfiles = (() => {
 	async function fromCommandLine(body) {
 		switch (body.kind) {
 			case "forget":
-				// like "Turn off profile features" in the popup
-				await api.storage.sync.set({ profilesAdHidden: true });
+				// like "Turn off profile features" in the popup, which offers
+				// to turn them back on
+				await api.storage.sync.set({ profilesAdHidden: false });
 				await api.permissions.remove({ permissions: ["nativeMessaging", "contextMenus"] }).catch(() => {});
 				// at once, without waiting on the permission's removal to be reported
 				disconnect();
@@ -350,16 +351,29 @@ globalThis.TabstackProfiles = (() => {
 	}
 
 	// Every other profile's tabs, labeled with the profile they're in.
+	// Every other profile's tabs, labeled with the profile they're in, and
+	// the profiles themselves, so typing one's name switches to it.
 	async function searchOthers() {
-		if (!connected || !shared.values.searchAll) return { tabs: [], closed: [] };
 		const tabs = [];
 		const closed = [];
+		if (!connected) return { tabs, closed, profiles: [] };
+		const profiles = shared.values.searchProfiles
+			? others()
+					.filter((p) => p.windows > 0)
+					.map((p) => ({ profileSwitch: true, profile: p.profile, title: nameOf(p.profile), subtitle: "Switch to this profile" }))
+			: [];
+		if (!shared.values.searchAll) return { tabs, closed, profiles };
 		for (const answer of await ask("*", { kind: "tabs" })) {
 			const label = { profile: answer.from, profileName: nameOf(answer.from) };
 			tabs.push(...(answer.tabs ?? []).map((t) => ({ ...t, ...label })));
 			closed.push(...(answer.closed ?? []).map((t) => ({ ...t, ...label })));
 		}
-		return { tabs, closed };
+		return { tabs, closed, profiles };
+	}
+
+	// Brings another profile forward, as the shortcut does.
+	async function switchTo(to) {
+		post(to, { kind: "focus", frame: await currentFrame() });
 	}
 
 	async function activateIn(to, tabId, windowId) {
@@ -667,5 +681,5 @@ globalThis.TabstackProfiles = (() => {
 		return status();
 	}
 
-	return { init, status, setShared, reconnect, cycle, searchOthers, activateIn, restoreIn, closeIn, onToastAction };
+	return { init, status, setShared, reconnect, cycle, switchTo, searchOthers, activateIn, restoreIn, closeIn, onToastAction };
 })();

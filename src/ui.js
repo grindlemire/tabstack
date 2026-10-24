@@ -373,6 +373,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.mode = null;
 			this.tabs = [];
 			this.closed = [];
+			this.profiles = []; // other profiles, to switch to by name
 			this.results = [];
 			this.selected = 0;
 			this.drawn = null; // what render() last drew, so select() can patch it
@@ -409,6 +410,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.input.value = "";
 			this.debug.textContent = "";
 			this.removed.clear();
+			this.profiles = [];
 			// the ring shouldn't slide over from where the last session left it
 			this.ring.classList.add("instant");
 			requestAnimationFrame(() => this.ring.classList.remove("instant"));
@@ -423,13 +425,15 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			else this.select(Math.min(1, tabs.length - 1));
 		}
 
-		// Other profiles' tabs, which arrive after this one's. The selection
-		// stays put, and a lone match doesn't switch on its own, since the
-		// list just changed under the person typing.
-		addResults(tabs, closed) {
+		// Other profiles' tabs, and the profiles themselves, which arrive
+		// after this one's tabs. The selection stays put, and a lone match
+		// doesn't switch on its own, since the list just changed under the
+		// person typing.
+		addResults(tabs, closed, profiles = []) {
 			if (!this.isOpen || this.mode !== "search") return;
 			this.tabs = [...this.tabs, ...tabs];
 			this.closed = [...this.closed, ...closed];
+			this.profiles = profiles;
 			this.filter({ keepSelection: true });
 		}
 
@@ -474,9 +478,11 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 
 		filter({ keepSelection = false } = {}) {
 			const query = this.input.value.trim();
-			// the tab you're on is never a result; closed tabs show once you type
-			const candidates = [...this.tabs.slice(1), ...(query ? this.closed : [])];
-			this.results = rank(candidates, query);
+			// the tab you're on is never a result; closed tabs and profiles show
+			// once you type, and a profile whose name matches comes first
+			const candidates = [...this.tabs.slice(1), ...(query ? [...this.closed, ...this.profiles] : [])];
+			const ranked = rank(candidates, query);
+			this.results = [...ranked.filter((r) => r.item.profileSwitch), ...ranked.filter((r) => !r.item.profileSwitch)];
 			clearTimeout(this.autoTimer);
 			const only = this.results.length === 1 && this.results[0].item;
 			if (this.autoSwitch && query && only && !only.closed && !keepSelection) {
@@ -495,7 +501,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			const item = this.items()[this.selected];
 			// another profile's tab can share an id with one here, so compare
 			// the items themselves
-			if (!item || item.closed || item === this.tabs[0]) return;
+			if (!item || item.closed || item.profileSwitch || item === this.tabs[0]) return;
 			this.removed.add(item.id);
 			// the background answers with the tabs now on top, to fill the gap
 			Promise.resolve(this.onCloseTab(item)).then((reply) => reply?.tabs && this.addTabs(reply.tabs));
@@ -606,7 +612,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 				const text = el("div", "text");
 				text.append(
 					marked(item.title || host(item.url), marks?.title, "title"),
-					marked(host(item.url), marks?.site, "url"),
+					item.subtitle ? el("div", "url", item.subtitle) : marked(host(item.url), marks?.site, "url"),
 				);
 				row.append(favicon(item), text);
 				if (item.audible) row.append(speaker());
