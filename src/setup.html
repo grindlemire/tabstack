@@ -1,0 +1,287 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>tabstack: profiles</title>
+		<style>
+			/* System fonts only: tabstack makes no network requests, fonts included. */
+			:root {
+				--bg: #f5f5f7;
+				--group: #ffffff;
+				--fg: #1d1d1f;
+				--muted: #6e6e73;
+				--line: rgba(0, 0, 0, 0.08);
+				--code: rgba(0, 0, 0, 0.05);
+				--cap-top: #ffffff;
+				--cap-bottom: #f0f0f3;
+				--cap-edge: rgba(0, 0, 0, 0.16);
+				--accent: #3b6cf6;
+				--accent-soft: rgba(59, 108, 246, 0.12);
+				--ok: #1e8e3e;
+				--error: #d93025;
+				color-scheme: light dark;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #18181a;
+					--group: #242427;
+					--fg: #f5f5f7;
+					--muted: #98989d;
+					--line: rgba(255, 255, 255, 0.08);
+					--code: rgba(255, 255, 255, 0.06);
+					--cap-top: #3a3a3e;
+					--cap-bottom: #2e2e32;
+					--cap-edge: rgba(0, 0, 0, 0.5);
+					--accent: #5b85ff;
+					--accent-soft: rgba(91, 133, 255, 0.16);
+					--ok: #5bd17a;
+					--error: #ff6b5b;
+				}
+			}
+
+			* { box-sizing: border-box; }
+			[hidden] { display: none !important; }
+			body {
+				margin: 0;
+				padding: 48px 16px 64px;
+				font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+				color: var(--fg);
+				background: var(--bg);
+				-webkit-font-smoothing: antialiased;
+			}
+			main { max-width: 600px; margin: 0 auto; }
+
+			header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+			header img { width: 32px; height: 32px; }
+			h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.015em; }
+			.lede { margin: 0 0 20px; color: var(--muted); }
+
+			ul.gets { margin: 0 0 28px; padding-left: 20px; }
+			ul.gets li + li { margin-top: 4px; }
+
+			.card {
+				padding: 16px 18px;
+				background: var(--group);
+				border-radius: 12px;
+				box-shadow: 0 0 0 0.5px var(--line), 0 1px 2px rgba(0, 0, 0, 0.04);
+			}
+			.card + .card { margin-top: 10px; }
+			.card h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+			.card p { margin: 0 0 8px; color: var(--muted); }
+			.card p:last-child { margin-bottom: 0; }
+
+			ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+			.step { counter-increment: step; position: relative; padding-left: 52px; }
+			.step::before {
+				content: counter(step);
+				position: absolute;
+				left: 18px;
+				top: 16px;
+				display: grid;
+				place-items: center;
+				width: 22px;
+				height: 22px;
+				font-size: 12px;
+				font-weight: 650;
+				color: var(--accent);
+				background: var(--accent-soft);
+				border-radius: 50%;
+			}
+
+			.command { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; }
+			code {
+				flex: 1;
+				min-width: 0;
+				padding: 8px 10px;
+				font: 12.5px/1.5 ui-monospace, Menlo, monospace;
+				background: var(--code);
+				border-radius: 8px;
+				overflow-wrap: anywhere;
+				white-space: pre-wrap;
+			}
+
+			button {
+				flex: none;
+				padding: 6px 12px;
+				font: inherit;
+				font-size: 13px;
+				font-weight: 500;
+				color: var(--accent);
+				background: var(--accent-soft);
+				border: 0;
+				border-radius: 8px;
+				cursor: pointer;
+			}
+			button.primary { padding: 8px 18px; font-size: 14px; color: #fff; background: var(--accent); }
+			button.quiet { padding: 0; color: var(--accent); background: none; }
+			button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+			.row { display: flex; align-items: center; gap: 12px; }
+			.row .label { flex: 1; }
+			.row .label small { display: block; font-size: 12px; color: var(--muted); }
+			input[type="text"] {
+				width: 220px;
+				max-width: 100%;
+				padding: 6px 10px;
+				font: inherit;
+				color: var(--fg);
+				background: var(--bg);
+				border: 1px solid var(--line);
+				border-radius: 8px;
+				outline: none;
+			}
+			input[type="text"]:focus { border-color: var(--accent); }
+
+			.keys { display: inline-flex; gap: 3px; }
+			.keys + .keys { margin-left: 8px; }
+			kbd {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				min-width: 22px;
+				height: 22px;
+				padding: 0 5px;
+				font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+				background: linear-gradient(var(--cap-top), var(--cap-bottom));
+				border-radius: 5px;
+				box-shadow: 0 0 0 0.5px var(--cap-edge), 0 1px 0 var(--cap-edge);
+			}
+
+			.card.stacked { display: flex; flex-direction: column; gap: 8px; }
+			.card.stacked .label small { display: block; font-size: 12px; color: var(--muted); }
+			textarea {
+				width: 100%;
+				padding: 8px 10px;
+				font: 12.5px/1.5 ui-monospace, Menlo, monospace;
+				color: var(--fg);
+				background: var(--bg);
+				border: 1px solid var(--line);
+				border-radius: 8px;
+				outline: none;
+				resize: vertical;
+			}
+			textarea:focus { border-color: var(--accent); }
+			.done { display: flex; align-items: center; gap: 12px; margin: 16px 0 0; }
+			.done .status { margin-top: 0; }
+			.status { margin-top: 10px; font-weight: 500; }
+			#manage-status { margin-top: 0; }
+			#manage { margin-top: 20px; }
+			/* the cards below what comes before them, as the cards in a list are */
+			#settings, #manage + #settings { margin-top: 10px; }
+			.actions { display: flex; gap: 8px; margin-top: 12px; }
+			button.danger { color: var(--error); background: none; padding-left: 4px; }
+			code.inline { flex: none; padding: 1px 5px; font-size: 12px; white-space: nowrap; }
+			.status:empty { display: none; }
+			.status.ok { color: var(--ok); }
+			.status.error { color: var(--error); }
+			.after { margin: 20px 4px 0; color: var(--muted); }
+		</style>
+	</head>
+	<body>
+		<main>
+			<header>
+				<img src="icons/icon-48.png" alt="" />
+				<h1 id="title">Work across your Chrome profiles</h1>
+			</header>
+
+			<!-- opened from tabstack's popup -->
+			<section id="manual" hidden>
+				<p class="lede">
+					Chrome keeps each profile's extensions apart, so tabstack needs a small helper app to work across them. It
+					runs only while Chrome does, and only passes messages between tabstack in your profiles, on this computer.
+				</p>
+				<ul class="gets">
+					<li>Switch profiles with <span class="shortcut-text">⌃⌘→ and ⌃⌘←</span>, each profile's window in the same place</li>
+					<li>Search the tabs in every profile at once</li>
+					<li>Open links in the profile they belong to, like work sites in your work profile</li>
+					<li>Move a tab or open a link in another profile from the right-click menu</li>
+					<li>Hear about it when a page you open is already open in another profile</li>
+				</ul>
+				<ol class="steps">
+					<li class="card step">
+						<h2>Install the helper</h2>
+						<p>With Go, on macOS or Linux:</p>
+						<div class="command">
+							<code id="build-cmd">go install github.com/grindlemire/tabstack/tabstack-host@latest</code>
+							<button data-copy="build-cmd">Copy</button>
+						</div>
+					</li>
+					<li class="card step">
+						<h2>Run its setup</h2>
+						<div class="command">
+							<code id="install-cmd">~/go/bin/tabstack-host install</code>
+							<button data-copy="install-cmd">Copy</button>
+						</div>
+						<p>
+							It finds tabstack in each of your profiles and opens a tab like this one in each, where you click Allow.
+							That's all.
+						</p>
+					</li>
+				</ol>
+				<p class="after">
+					Already ran it? <button class="quiet" id="connect-here">Connect this profile</button>
+				</p>
+			</section>
+
+			<!-- opened by tabstack-host install, in one profile -->
+			<section id="from-cli" hidden>
+				<p class="lede" id="cli-lede"></p>
+				<div class="card">
+					<button class="primary" id="allow">Allow</button>
+					<div class="status" id="status"></div>
+				</div>
+			</section>
+
+			<!-- opened from tabstack's popup, once this profile is set up -->
+			<section id="manage" hidden>
+				<div class="card">
+					<div class="status" id="manage-status"></div>
+					<div class="actions">
+						<button id="reconnect">Reconnect</button>
+						<button class="danger" id="turn-off">Turn off in this profile</button>
+					</div>
+				</div>
+				<div class="card">
+					<h2>From the terminal</h2>
+					<p>Every profile, numbered, and how it's connected:</p>
+					<div class="command">
+						<code id="list-cmd">tabstack-host list</code>
+						<button data-copy="list-cmd">Copy</button>
+					</div>
+					<p>
+						<code class="inline">install</code> connects the rest. <code class="inline">connect</code>,
+						<code class="inline">disconnect</code>, <code class="inline">reset</code>, <code class="inline">rename</code> and
+						<code class="inline">links</code> manage one profile, named by its number from the list.
+					</p>
+				</div>
+			</section>
+
+			<!-- once this profile can reach the helper -->
+			<section id="settings" hidden>
+				<div class="card row">
+					<span class="label">This profile's name<small>Your other profiles show it</small></span>
+					<input type="text" id="name" maxlength="40" spellcheck="false" />
+				</div>
+				<div class="card stacked">
+					<span class="label">Links that open in this profile<small>One per line, like corp.com, *.corp.com, github.com/acme or github.com/a*. Optional.</small></span>
+					<textarea id="links" rows="3" spellcheck="false" placeholder="*.corp.com"></textarea>
+				</div>
+				<div class="card row">
+					<span class="label">Switch profiles</span>
+					<span id="keys"></span>
+					<button id="shortcuts">Change</button>
+				</div>
+				<!-- for tabstack-host install, which waits for it before moving on -->
+				<div class="done" id="done-row" hidden>
+					<button class="primary" id="done">Done</button>
+					<span class="status" id="done-status"></span>
+				</div>
+				<p class="after" id="after">You can close this tab. Everything else is under Profiles in tabstack's toolbar popup.</p>
+			</section>
+		</main>
+
+		<script src="shared.js"></script>
+		<script src="setup.js"></script>
+	</body>
+</html>

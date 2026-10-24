@@ -1,6 +1,6 @@
 // Toolbar popup: shortcuts and options.
 
-const { api, isMac, DEFAULTS, loadSettings, fromEvent, format } = TabstackShared;
+const { api, isMac, isFirefox, DEFAULTS, loadSettings, fromEvent, format } = TabstackShared;
 const $ = (id) => document.getElementById(id);
 
 // Firefox lets an extension rebind its own commands. Chrome only allows it on
@@ -156,6 +156,106 @@ async function refresh() {
 	$("show-timings").checked = s.showTimings;
 }
 
+// --- profiles (profiles.js) ---
+//
+// Shown only once the profile helper is set up. Until then there's one small
+// offer to set it up, which stays dismissed once closed.
+
+const PERMISSIONS = { permissions: ["nativeMessaging", "contextMenus"] };
+
+const openSetup = () => {
+	api.tabs.create({ url: "setup.html" });
+	window.close();
+};
+
+async function refreshProfiles() {
+	if (isFirefox) return;
+	const status = await api.runtime.sendMessage({ type: "profiles" }).catch(() => null);
+	if (!status || !("granted" in status)) return;
+	const { profilesAdHidden } = await api.storage.sync.get("profilesAdHidden");
+	$("profiles-ad").hidden = status.granted || !!profilesAdHidden;
+	$("profiles").hidden = !status.granted;
+	if (!status.granted) return;
+
+	const others = status.peers.filter((p) => !p.self);
+	if (!status.connected && /not found/.test(status.error)) {
+		// uninstalled, or never registered with this browser
+		$("profiles-status").textContent = "The profile helper isn't installed";
+		$("profiles-detail").textContent = "Run tabstack-host install, or turn off profile features below.";
+	} else if (!status.connected) {
+		$("profiles-status").textContent = "Can't reach the profile helper";
+		$("profiles-detail").textContent = status.error;
+	} else if (!others.length) {
+		$("profiles-status").textContent = "Only this profile so far";
+		$("profiles-detail").textContent = "Set up tabstack in your other profiles too.";
+	} else {
+		const one = others.length === 1;
+		$("profiles-status").textContent = `Connected to ${one ? others[0].name : `${others.length} profiles`}`;
+		$("profiles-detail").textContent = one ? "" : others.map((p) => p.name).join(" · ");
+	}
+
+	if (document.activeElement !== $("profile-name")) $("profile-name").value = status.name;
+	$("profile-name").placeholder = status.placeholder;
+	if (document.activeElement !== $("profile-claims")) $("profile-claims").value = status.claims.join("\n");
+	for (const box of document.querySelectorAll("[data-shared]")) box.checked = !!status.shared[box.dataset.shared];
+	$("claims-row").hidden = !status.shared.route;
+
+	const commands = await api.commands.getAll();
+	const keys = ["profile-prev", "profile-next"].map((n) => prettyCommand(commands.find((c) => c.name === n)?.shortcut));
+	// ⌃⌘← and ⌃⌘→ show as ⌃⌘←→: the popup's too narrow for both in full
+	const [prev, next] = keys;
+	if (prev && next && prev.slice(0, -1) === next.slice(0, -1) && !prev.includes("+")) {
+		showKeys($("profile-keys"), prev);
+		$("profile-keys").append(Object.assign(document.createElement("kbd"), { textContent: next.slice(-1) }));
+		$("profile-keys").classList.remove("unset");
+	} else if (keys.some(Boolean)) {
+		const groups = keys.filter(Boolean).map((k) => {
+			const group = Object.assign(document.createElement("span"), { className: "keys" });
+			showKeys(group, k);
+			return group;
+		});
+		$("profile-keys").replaceChildren(...groups);
+		$("profile-keys").classList.remove("unset");
+	} else {
+		$("profile-keys").textContent = "Not set";
+		$("profile-keys").classList.add("unset");
+	}
+}
+
+$("profiles-learn").addEventListener("click", openSetup);
+$("profiles-setup").addEventListener("click", openSetup);
+$("profiles-ad-hide").addEventListener("click", () => {
+	api.storage.sync.set({ profilesAdHidden: true });
+	$("profiles-ad").hidden = true;
+});
+$("profile-keys-change").addEventListener("click", () => {
+	api.tabs.create({ url: "chrome://extensions/shortcuts" });
+	window.close();
+});
+$("profiles-off").addEventListener("click", async () => {
+	await api.permissions.remove(PERMISSIONS);
+	await api.storage.sync.set({ profilesAdHidden: true });
+	refreshProfiles();
+});
+
+for (const box of document.querySelectorAll("[data-shared]")) {
+	box.addEventListener("change", () => {
+		api.runtime.sendMessage({ type: "profilesShared", values: { [box.dataset.shared]: box.checked } });
+		if (box.dataset.shared === "route") $("claims-row").hidden = !box.checked;
+	});
+}
+
+let nameTimer = 0;
+$("profile-name").addEventListener("input", (e) => {
+	clearTimeout(nameTimer);
+	nameTimer = setTimeout(() => api.storage.sync.set({ profileName: e.target.value.trim() }), 300);
+});
+$("profile-claims").addEventListener("change", (e) => {
+	const claims = e.target.value.split("\n").map((c) => c.trim()).filter(Boolean);
+	api.storage.sync.set({ profileClaims: claims });
+});
+
 refresh();
+refreshProfiles();
 // the shortcut may have just been set on Chrome's shortcuts page
 api.runtime.sendMessage({ type: "checkShortcut" });
