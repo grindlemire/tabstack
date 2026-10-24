@@ -110,17 +110,17 @@ func openSession() (*session, error) {
 
 	// connected profiles by where they are, as install set them up
 	byWhere := map[string]*hubPeer{}
-	var unplaced []*hubPeer
+	var connected []*hubPeer
 	for _, c := range s.hubs {
 		for i := range c.peers {
 			p := &c.peers[i]
+			connected = append(connected, p)
 			if p.Info.Where != "" {
 				byWhere[p.Info.Where] = p
-			} else {
-				unplaced = append(unplaced, p)
 			}
 		}
 	}
+	placed := map[*hubPeer]bool{}
 
 	for _, b := range knownBrowsers(home) {
 		if !b.installed() {
@@ -133,11 +133,16 @@ func openSession() (*session, error) {
 		for _, p := range list {
 			e := entry{b: b, p: p}
 			e.peer = byWhere[b.key(p)]
+			placed[e.peer] = true
 			s.entries = append(s.entries, e)
 		}
 	}
-	for _, p := range unplaced {
-		s.entries = append(s.entries, entry{peer: p})
+	// connected, but not to a profile found here: set up before install
+	// said where profiles are, or in a browser it doesn't know
+	for _, p := range connected {
+		if !placed[p] {
+			s.entries = append(s.entries, entry{peer: p})
+		}
 	}
 	for i := range s.entries {
 		s.entries[i].n = i + 1
@@ -196,7 +201,7 @@ func list(w io.Writer) error {
 	for _, e := range s.entries {
 		group := e.b.name
 		if e.b.name == "" {
-			group = "Connected, but not set up by tabstack-host install"
+			group = "Other connected profiles"
 		}
 		if group != heading {
 			heading = group
