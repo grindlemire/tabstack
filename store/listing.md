@@ -32,7 +32,7 @@ tabstack keeps your tabs in the order you last used them and lets you move throu
 
 Tap Cmd+J (Ctrl+J on Windows and Linux) to jump back to the tab you were just on. Hold Cmd and press J again to go further back through your five most recent tabs, each shown as a thumbnail, then let go to switch. If you go one tab too far, Cmd+Shift+J steps forward again.
 
-Press Cmd+Shift+Space (Ctrl+Shift+Space on Windows and Linux) on any page to search every open tab by title or address. Search matches loosely, so "gpr" finds a GitHub pull request and the typo "rainer" still finds Mount Rainier. When only one tab matches, tabstack switches to it right away. Recently closed tabs show up below your open ones, and pressing Enter on one reopens it.
+Press Cmd+Shift+Space (Ctrl+Shift+Space on Windows and Linux) on any page to search every open tab by title or address. Search matches loosely, so "gpr" finds a GitHub pull request and the typo "rainer" still finds Mount Rainier. When only one tab matches, tabstack switches to it right away. Turn on recently closed tabs in settings and they show up below your open ones, where pressing Enter on one reopens it.
 
 While the switcher is open:
 - Backspace or X closes the selected tab
@@ -44,11 +44,13 @@ tabstack takes a thumbnail when you visit a tab and refreshes it while you stay 
 Click the toolbar icon to:
 - change the switch and search shortcuts
 - turn off switching when search finds a single tab
-- leave recently closed tabs out of search
+- include recently closed tabs in search
 - cycle through the current window's tabs only
 
+If you use more than one Chrome profile, an optional helper app connects tabstack in each of them. Ctrl+Cmd+Right and Left switch between profiles, search covers every profile's tabs, and links you list for a profile open there from any profile. Nothing changes unless you set it up; see https://tabstack.alethi.dev for how.
+
 Privacy
-tabstack has no servers of its own and never sends your tabs, history or settings anywhere. Your settings, tab order and thumbnails stay in the browser's extension storage on your computer, and there's no account or analytics.
+tabstack has no servers of its own and never sends your tabs, history or settings anywhere. Your settings, tab order and thumbnails stay in the browser's extension storage on your computer, and there's no account or analytics. The optional profile helper only passes messages between tabstack in your profiles on the same computer.
 
 Chrome doesn't let extensions draw on its own pages, such as settings, the new tab page and the Web Store. On those pages Cmd+J switches straight to your previous tab and the switcher opens there instead.
 ```
@@ -56,7 +58,7 @@ Chrome doesn't let extensions draw on its own pages, such as settings, the new t
 ### Single purpose
 
 ```
-Switch between recently used browser tabs from the keyboard, with thumbnails of each tab and a search over open and recently closed tabs.
+Switch between recently used browser tabs from the keyboard, with thumbnails of each tab and a search over open tabs, including tabs in the user's other Chrome profiles.
 ```
 
 ### Permission justifications
@@ -83,7 +85,7 @@ Shows each tab's icon in the switcher using Chrome's favicon cache, which also c
 
 **sessions**
 ```
-Lists recently closed tabs in search and reopens the one the user picks. The user can turn this off in the extension's settings.
+Lists recently closed tabs in search and reopens the one the user picks. It's off until the user turns it on in the extension's settings.
 ```
 
 **alarms**
@@ -99,6 +101,16 @@ Pauses the thumbnail refresh while the user is away from the computer, so the ex
 **Host permission (all sites)**
 ```
 The switcher is drawn over the page the user is on, which needs a content script on every site, since the user can press the shortcut anywhere. Capturing a thumbnail of the visible tab with tabs.captureVisibleTab also requires access to that page. Nothing is read from the page beyond the screenshot used for the thumbnail, and nothing leaves the user's computer.
+```
+
+**nativeMessaging** (optional)
+```
+Connects to tabstack-host, an optional open-source helper app the user installs to use tabstack across their Chrome profiles. Chrome keeps each profile's extensions apart, so the helper passes messages between tabstack in each profile, on the user's computer only. tabstack asks for this permission only when the user sets up the helper, and removes it when they turn the feature off.
+```
+
+**contextMenus** (optional)
+```
+Adds "Move this tab to" and "Open link in" another Chrome profile to the right-click menu. tabstack asks for it together with nativeMessaging, only when the user sets up working across profiles.
 ```
 
 **Remote code:** "No, I am not using remote code." Every script ships in the
@@ -125,6 +137,8 @@ lending decisions.
 
 ```
 Open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the previous tab. Hold Cmd and press J repeatedly to cycle through recent tabs, and press Cmd+Shift+Space to search. No account or login is needed.
+
+Working across Chrome profiles is optional and needs a separate helper app, tabstack-host (source: https://github.com/grindlemire/tabstack/tree/main/tabstack-host). Everything above works without it, and its permissions are only requested when the user sets it up.
 ```
 
 ## addons.mozilla.org
@@ -137,7 +151,7 @@ Open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the 
 ### Summary
 
 ```
-Tap Cmd+J to jump back to your last tab, hold it to flip through your recent tabs with thumbnails the way Arc does, and press Cmd+Shift+Space to search every open and recently closed tab.
+Tap Cmd+J to jump back to your last tab, hold it to flip through your recent tabs with thumbnails the way Arc does, and press Cmd+Shift+Space to search every open tab.
 ```
 
 ### Description
@@ -147,7 +161,7 @@ tabstack keeps your tabs in the order you last used them and lets you move throu
 
 Tap Cmd+J (Ctrl+J on Windows and Linux) to jump back to the tab you were just on. Hold Cmd and press J again to go further back through your five most recent tabs, each shown as a thumbnail, then let go to switch. If you go one tab too far, Cmd+Shift+J steps forward again.
 
-Press Cmd+Shift+Space (Ctrl+Shift+Space on Windows and Linux) on any page to search every open tab by title or address. Search matches loosely, so "gpr" finds a GitHub pull request and the typo "rainer" still finds Mount Rainier. When only one tab matches, tabstack switches to it right away. Recently closed tabs show up below your open ones, and pressing Enter on one reopens it.
+Press Cmd+Shift+Space (Ctrl+Shift+Space on Windows and Linux) on any page to search every open tab by title or address. Search matches loosely, so "gpr" finds a GitHub pull request and the typo "rainer" still finds Mount Rainier. When only one tab matches, tabstack switches to it right away. Turn on recently closed tabs in settings and they show up below your open ones, where pressing Enter on one reopens it.
 
 While the switcher is open:
 - Backspace or X closes the selected tab
@@ -159,7 +173,7 @@ tabstack takes a thumbnail when you visit a tab and refreshes it while you stay 
 Click the toolbar icon to:
 - change the switch and search shortcuts
 - turn off switching when search finds a single tab
-- leave recently closed tabs out of search
+- include recently closed tabs in search
 - cycle through the current window's tabs only
 
 Privacy
