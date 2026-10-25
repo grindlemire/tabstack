@@ -135,9 +135,11 @@
 				// profile is set on another profile's tabs (profiles.js)
 				onCommit: (item) =>
 					send(
-						item.closed
-							? { type: "restore", sessionId: item.sessionId, profile: item.profile }
-							: { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile },
+						item.profileSwitch
+							? { type: "switchProfile", profile: item.profile }
+							: item.closed
+								? { type: "restore", sessionId: item.sessionId, profile: item.profile }
+								: { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile },
 					),
 				onCloseTab: (tab) => send({ type: "closeTab", tabId: tab.id, profile: tab.profile }),
 				onClose: hide,
@@ -235,7 +237,9 @@
 		// then other profiles' tabs, when the profile helper is set up
 		if (wasOpen || !result) return;
 		const elsewhere = await send({ type: "tabsElsewhere" });
-		if (elsewhere?.tabs?.length || elsewhere?.closed?.length) s.addResults(elsewhere.tabs, elsewhere.closed);
+		if (elsewhere?.tabs?.length || elsewhere?.closed?.length || elsewhere?.profiles?.length) {
+			s.addResults(elsewhere.tabs, elsewhere.closed, elsewhere.profiles);
+		}
 	}
 
 	// --- notices from profiles.js: a link moved here, or a page open elsewhere ---

@@ -10,6 +10,7 @@ const { api } = TabstackShared;
 const $ = (id) => document.getElementById(id);
 const PERMISSIONS = { permissions: ["nativeMessaging", "contextMenus"] };
 const POLL = 1500; // ms; other profiles connect while this page is open
+const CLOSE_AFTER = 1200; // ms after Done that the page closes itself
 
 const params = new URLSearchParams(location.search);
 const where = params.get("where");
@@ -200,8 +201,10 @@ async function finish() {
 	}
 	$("done-status").className = took ? "status ok" : "status error";
 	$("done-status").textContent = took
-		? "Saved. tabstack-host moves on to your next profile, if there is one. You can close this tab."
+		? "Saved. tabstack-host moves on to your next profile, if there is one."
 		: "Saved, but tabstack's background didn't pass it on. Reload tabstack on chrome://extensions, then click Done again.";
+	// this tab's work is done; a moment to read that it saved, then it goes
+	if (took) setTimeout(async () => api.tabs.remove((await api.tabs.getCurrent()).id), CLOSE_AFTER);
 }
 $("done").addEventListener("click", finish);
 

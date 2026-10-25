@@ -22,9 +22,11 @@ const switcher = new TabstackUI.Switcher(shadow, {
 		committing = true;
 		// profile is set on another profile's tabs (profiles.js)
 		port.postMessage(
-			item.closed
-				? { type: "restore", sessionId: item.sessionId, profile: item.profile }
-				: { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile },
+			item.profileSwitch
+				? { type: "switchProfile", profile: item.profile }
+				: item.closed
+					? { type: "restore", sessionId: item.sessionId, profile: item.profile }
+					: { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile },
 		);
 	},
 	onCloseTab: (tab) => port.postMessage({ type: "closeTab", tabId: tab.id, profile: tab.profile }),
@@ -51,7 +53,7 @@ port.onMessage.addListener(async (msg) => {
 	} else if (msg.type === "tabs") {
 		switcher.setTabs(msg.tabs, msg.closed);
 	} else if (msg.type === "moreTabs") {
-		switcher.addResults(msg.tabs, msg.closed);
+		switcher.addResults(msg.tabs, msg.closed, msg.profiles);
 	} else if (msg.type === "done") {
 		window.close();
 	}

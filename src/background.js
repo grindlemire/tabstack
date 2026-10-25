@@ -433,7 +433,7 @@ function restoreItem({ sessionId, profile }) {
 }
 
 async function searchOthers() {
-	return (await profiles?.searchOthers()) ?? { tabs: [], closed: [] };
+	return (await profiles?.searchOthers()) ?? { tabs: [], closed: [], profiles: [] };
 }
 
 // --- the switch command ---
@@ -656,6 +656,9 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 		case "tabsElsewhere":
 			searchOthers().then(sendResponse);
 			return true;
+		case "switchProfile":
+			profiles?.switchTo(msg.profile);
+			break;
 		case "activate":
 			if (jump?.via === tabId && msg.tabId !== jump.via && msg.tabId !== jump.from) jump.to = msg.tabId;
 			activateItem(msg);
@@ -718,9 +721,10 @@ api.runtime.onConnect.addListener((port) => {
 		if (switcherPort === port) switcherPort = null;
 	});
 	port.onMessage.addListener(async (msg) => {
-		if (msg.type === "activate" || msg.type === "restore") {
+		if (msg.type === "activate" || msg.type === "restore" || msg.type === "switchProfile") {
 			if (msg.type === "activate") await activateItem(msg);
-			else await restoreItem(msg);
+			else if (msg.type === "restore") await restoreItem(msg);
+			else await profiles?.switchTo(msg.profile);
 			try {
 				port.postMessage({ type: "done" });
 			} catch {
@@ -734,7 +738,7 @@ api.runtime.onConnect.addListener((port) => {
 			port.postMessage({ type: "tabs", tabs, closed });
 			// other profiles' tabs follow, so a slow one doesn't hold up these
 			const elsewhere = await searchOthers();
-			if (elsewhere.tabs.length || elsewhere.closed.length) {
+			if (elsewhere.tabs.length || elsewhere.closed.length || elsewhere.profiles.length) {
 				try {
 					port.postMessage({ type: "moreTabs", ...elsewhere });
 				} catch {
