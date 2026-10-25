@@ -272,7 +272,7 @@ func install(w io.Writer, extraIDs []string) error {
 		return fmt.Errorf("tabstack-host doesn't support %s yet", runtime.GOOS)
 	}
 
-	targets, err := register(w, browsers, exe, extraIDs)
+	targets, missing, err := register(w, browsers, exe, extraIDs)
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func install(w io.Writer, extraIDs []string) error {
 		fmt.Fprintln(w, "Looking for tabstack…")
 		for end := time.Now().Add(prefsDelay); len(targets) == 0 && time.Now().Before(end); {
 			time.Sleep(time.Second)
-			if targets, err = register(io.Discard, browsers, exe, extraIDs); err != nil {
+			if targets, missing, err = register(io.Discard, browsers, exe, extraIDs); err != nil {
 				return err
 			}
 		}
@@ -293,13 +293,17 @@ func install(w io.Writer, extraIDs []string) error {
 	if len(targets) == 0 {
 		return errors.New("tabstack isn't installed in any profile. Install it in each profile you use, then run this again")
 	}
-	return connectAll(w, home, targets)
+	err = connectAll(w, home, targets)
+	for _, t := range missing {
+		fmt.Fprintf(w, "tabstack isn't installed in %s. Install it there, then run tabstack-host connect %q.\n", t.p.name, t.p.dir)
+	}
+	return err
 }
 
 // register finds tabstack in each browser's profiles, registers the helper
-// with every browser that has it, and lists what it found.
-func register(w io.Writer, browsers []browser, exe string, extraIDs []string) ([]target, error) {
-	var targets []target
+// with every browser that has it, and lists what it found: the profiles with
+// tabstack, and those without it in a browser that has it somewhere.
+func register(w io.Writer, browsers []browser, exe string, extraIDs []string) (targets, missing []target, err error) {
 	for _, b := range browsers {
 		if !b.installed() {
 			continue
@@ -319,7 +323,7 @@ func register(w io.Writer, browsers []browser, exe string, extraIDs []string) ([
 			continue
 		}
 		if err := writeHostManifest(b, exe, append(ids, extraIDs...)); err != nil {
-			return nil, fmt.Errorf("registering with %s: %w", b.name, err)
+			return nil, nil, fmt.Errorf("registering with %s: %w", b.name, err)
 		}
 		fmt.Fprintf(w, "%s\n", b.name)
 		for _, p := range list {
@@ -327,11 +331,13 @@ func register(w io.Writer, browsers []browser, exe string, extraIDs []string) ([
 			if p.id != "" {
 				note = "found tabstack"
 				targets = append(targets, target{b, p})
+			} else {
+				missing = append(missing, target{b, p})
 			}
 			fmt.Fprintf(w, "  %-28s %s\n", p.name, note)
 		}
 	}
-	return targets, nil
+	return targets, missing, nil
 }
 
 // connectAll sets up each profile that isn't connected yet, one at a time:
@@ -351,7 +357,7 @@ func connectAll(w io.Writer, home string, targets []target) error {
 		}
 	}
 	if len(waiting) == 0 {
-		fmt.Fprintln(w, "\nEvery profile is already connected.")
+		fmt.Fprintln(w, "\nEvery profile with tabstack is already connected.")
 		return nil
 	}
 
