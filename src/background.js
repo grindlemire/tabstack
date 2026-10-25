@@ -4,9 +4,11 @@
 // Searching from those pages opens the switcher in the toolbar popup.
 
 // Chrome runs this as a service worker; Firefox lists shared.js before it.
-if (typeof importScripts === "function") importScripts("shared.js");
+// Working across profiles (profiles.js) is Chrome only for now.
+if (typeof importScripts === "function") importScripts("shared.js", "profiles.js");
 
 const { api, isMac, loadSettings, onSettingsChange } = TabstackShared;
+const profiles = globalThis.TabstackProfiles ?? null; // only with the profile helper
 const isFirefox = /Firefox\//.test(navigator.userAgent);
 
 const THUMB_WIDTH = 400;
@@ -417,6 +419,23 @@ async function activate(tabId, windowId) {
 	await Promise.all([api.tabs.update(tabId, { active: true }), api.windows.update(windowId, { focused: true })]);
 }
 
+// --- other profiles (profiles.js) ---
+
+profiles?.init({ snapshot, recentlyClosed });
+
+// Search's rows can come from another profile, which then does what was asked.
+function activateItem({ tabId, windowId, profile }) {
+	return profile ? profiles?.activateIn(profile, tabId, windowId) : activate(tabId, windowId);
+}
+
+function restoreItem({ sessionId, profile }) {
+	return profile ? profiles?.restoreIn(profile, sessionId) : api.sessions.restore(sessionId);
+}
+
+async function searchOthers() {
+	return (await profiles?.searchOthers()) ?? { tabs: [], closed: [] };
+}
+
 // --- the switch command ---
 
 api.commands.onCommand.addListener((command, tab) => {
@@ -634,16 +653,37 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 				snapshot(tabId).then(sendResponse);
 			}
 			return true;
+		case "tabsElsewhere":
+			searchOthers().then(sendResponse);
+			return true;
 		case "activate":
 			if (jump?.via === tabId && msg.tabId !== jump.via && msg.tabId !== jump.from) jump.to = msg.tabId;
-			activate(msg.tabId, msg.windowId);
+			activateItem(msg);
 			break;
 		case "restore":
-			api.sessions.restore(msg.sessionId);
+			restoreItem(msg);
 			break;
 		case "closeTab":
+			if (msg.profile) {
+				profiles?.closeIn(msg.profile, msg.tabId);
+				break;
+			}
 			closeTab(msg.tabId, tabId).then((tabs) => sendResponse({ tabs }));
 			return true;
+		case "profiles":
+			if (!profiles) break;
+			profiles.status().then(sendResponse);
+			return true;
+		case "profilesShared":
+			profiles?.setShared(msg.values);
+			break;
+		case "profilesConnect":
+			if (!profiles) break;
+			profiles.reconnect().then(sendResponse);
+			return true;
+		case "toastAction":
+			profiles?.onToastAction(msg.id);
+			break;
 		case "open":
 			overlayOpen.add(tabId);
 			break;
@@ -679,18 +719,28 @@ api.runtime.onConnect.addListener((port) => {
 	});
 	port.onMessage.addListener(async (msg) => {
 		if (msg.type === "activate" || msg.type === "restore") {
-			if (msg.type === "activate") await activate(msg.tabId, msg.windowId);
-			else await api.sessions.restore(msg.sessionId);
+			if (msg.type === "activate") await activateItem(msg);
+			else await restoreItem(msg);
 			try {
 				port.postMessage({ type: "done" });
 			} catch {
 				// the window already closed itself
 			}
 		} else if (msg.type === "closeTab") {
-			api.tabs.remove(msg.tabId).catch(() => {});
+			if (msg.profile) profiles?.closeIn(msg.profile, msg.tabId);
+			else api.tabs.remove(msg.tabId).catch(() => {});
 		} else if (msg.type === "search") {
 			const [tabs, closed] = await Promise.all([snapshot(msg.currentId, { forSearch: true }), recentlyClosed()]);
 			port.postMessage({ type: "tabs", tabs, closed });
+			// other profiles' tabs follow, so a slow one doesn't hold up these
+			const elsewhere = await searchOthers();
+			if (elsewhere.tabs.length || elsewhere.closed.length) {
+				try {
+					port.postMessage({ type: "moreTabs", ...elsewhere });
+				} catch {
+					// closed already
+				}
+			}
 		}
 	});
 });
