@@ -20,6 +20,7 @@ globalThis.TabstackUI = (() => {
 	--card: rgba(0, 0, 0, 0.05);
 	--line: rgba(0, 0, 0, 0.1);
 	--accent: #3b6cf6;
+	--scroll: rgba(0, 0, 0, 0.22);
 	box-sizing: border-box;
 	font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 	color: var(--fg);
@@ -39,6 +40,7 @@ globalThis.TabstackUI = (() => {
 		--muted: #98989d;
 		--card: rgba(255, 255, 255, 0.07);
 		--line: rgba(255, 255, 255, 0.12);
+		--scroll: rgba(255, 255, 255, 0.22);
 	}
 }
 .panel[popover] {
@@ -101,8 +103,16 @@ globalThis.TabstackUI = (() => {
 	border-radius: 10px;
 	outline: none;
 }
-.rows { margin-top: 8px; max-height: min(380px, calc(100vh - 140px)); overflow-y: auto; }
-.row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; }
+.rows {
+	margin-top: 8px;
+	max-height: min(380px, calc(100vh - 140px));
+	overflow-y: auto;
+	/* a thin thumb in the panel's colors, with no track */
+	scrollbar-width: thin;
+	scrollbar-color: var(--scroll) transparent;
+}
+.row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; cursor: default; }
+.row:hover:not(.selected) { background: var(--card); }
 .row.selected { background: var(--accent); color: #fff; }
 .row.selected .url { color: rgba(255, 255, 255, 0.8); }
 .row.closed:not(.selected) .title { color: var(--muted); }

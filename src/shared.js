@@ -9,7 +9,7 @@ globalThis.TabstackShared = (() => {
 	const DEFAULTS = {
 		searchShortcut: { code: "Slash", key: "/", meta: isMac, ctrl: !isMac, alt: false, shift: false },
 		autoSwitch: true,
-		includeClosed: true,
+		includeClosed: false,
 		thisWindowOnly: false,
 		showTimings: false,
 	};

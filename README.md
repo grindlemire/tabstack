@@ -16,7 +16,7 @@ On Windows and Linux, use Ctrl in place of Cmd.
 | --- | --- |
 | Cmd+J | Switch to your last tab |
 | Hold Cmd, press J again | Go further back, then let go of Cmd to switch |
-| Cmd+Shift+Space | Search your open and recently closed tabs |
+| Cmd+Shift+Space | Search your open tabs (and recently closed ones, if you turn that on) |
 | Cmd+/ | Search too, but only on web pages |
 
 <p align="center">
