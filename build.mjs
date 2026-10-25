@@ -48,7 +48,8 @@ const manifest = {
 
 const CHROME_ONLY = ["profiles.js", "setup.html", "setup.js"];
 
-rmSync(dist, { recursive: true, force: true });
+// earlier versions' zips stay, so the one a store is still reviewing is kept
+rmSync(firefox, { recursive: true, force: true });
 cpSync(src, firefox, {
 	recursive: true,
 	filter: (path) => !basename(path).startsWith(".") && !CHROME_ONLY.includes(basename(path)),
