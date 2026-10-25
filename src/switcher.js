@@ -20,13 +20,14 @@ const shadow = document.getElementById("root").attachShadow({ mode: "open" });
 const switcher = new TabstackUI.Switcher(shadow, {
 	onCommit: (item) => {
 		committing = true;
+		// profile is set on another profile's tabs (profiles.js)
 		port.postMessage(
 			item.closed
-				? { type: "restore", sessionId: item.sessionId }
-				: { type: "activate", tabId: item.id, windowId: item.windowId },
+				? { type: "restore", sessionId: item.sessionId, profile: item.profile }
+				: { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile },
 		);
 	},
-	onCloseTab: (tab) => port.postMessage({ type: "closeTab", tabId: tab.id }),
+	onCloseTab: (tab) => port.postMessage({ type: "closeTab", tabId: tab.id, profile: tab.profile }),
 	onClose: () => {
 		// after a commit, wait for the background to confirm (or give up) so
 		// closing doesn't drop the message
@@ -49,6 +50,8 @@ port.onMessage.addListener(async (msg) => {
 		port.postMessage({ type: "search", currentId: switcher.tabs[0]?.id });
 	} else if (msg.type === "tabs") {
 		switcher.setTabs(msg.tabs, msg.closed);
+	} else if (msg.type === "moreTabs") {
+		switcher.addResults(msg.tabs, msg.closed);
 	} else if (msg.type === "done") {
 		window.close();
 	}

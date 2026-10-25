@@ -136,6 +136,19 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 }
 .audible { flex: none; width: 13px; height: 13px; color: var(--muted); }
 .row.selected .audible { color: inherit; }
+.profile {
+	flex: none;
+	max-width: 120px;
+	padding: 1px 7px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 11px;
+	color: var(--muted);
+	background: var(--card);
+	border-radius: 9px;
+}
+.row.selected .profile { color: #fff; background: rgba(255, 255, 255, 0.2); }
 .debug { margin-top: 8px; font: 11px/1.4 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre-wrap; }
 .debug:empty { display: none; }
 
@@ -410,6 +423,16 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			else this.select(Math.min(1, tabs.length - 1));
 		}
 
+		// Other profiles' tabs, which arrive after this one's. The selection
+		// stays put, and a lone match doesn't switch on its own, since the
+		// list just changed under the person typing.
+		addResults(tabs, closed) {
+			if (!this.isOpen || this.mode !== "search") return;
+			this.tabs = [...this.tabs, ...tabs];
+			this.closed = [...this.closed, ...closed];
+			this.filter({ keepSelection: true });
+		}
+
 		search() {
 			this.mode = "search";
 			this.filter();
@@ -470,11 +493,13 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 
 		closeSelected() {
 			const item = this.items()[this.selected];
-			if (!item || item.closed || item.id === this.tabs[0]?.id) return;
+			// another profile's tab can share an id with one here, so compare
+			// the items themselves
+			if (!item || item.closed || item === this.tabs[0]) return;
 			this.removed.add(item.id);
 			// the background answers with the tabs now on top, to fill the gap
 			Promise.resolve(this.onCloseTab(item)).then((reply) => reply?.tabs && this.addTabs(reply.tabs));
-			this.tabs = this.tabs.filter((t) => t.id !== item.id);
+			this.tabs = this.tabs.filter((t) => t !== item);
 			if (this.mode === "search") this.filter({ keepSelection: true });
 			else this.select(Math.min(this.selected, this.items().length - 1));
 		}
@@ -585,6 +610,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 				);
 				row.append(favicon(item), text);
 				if (item.audible) row.append(speaker());
+				if (item.profileName) row.append(el("span", "profile", item.profileName));
 				row.addEventListener("click", () => {
 					this.selected = i;
 					this.commit();

@@ -24,6 +24,7 @@
 		controller.abort();
 		switcher?.close();
 		hostEl?.remove();
+		hideToast();
 		try {
 			api.runtime.onMessage.removeListener(onMessage);
 		} catch {}
@@ -131,13 +132,14 @@
 			hostEl.style.outline = "none";
 			switcher = new TabstackUI.Switcher(hostEl.attachShadow({ mode: "closed" }), {
 				popover: true,
+				// profile is set on another profile's tabs (profiles.js)
 				onCommit: (item) =>
 					send(
 						item.closed
-							? { type: "restore", sessionId: item.sessionId }
-							: { type: "activate", tabId: item.id, windowId: item.windowId },
+							? { type: "restore", sessionId: item.sessionId, profile: item.profile }
+							: { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile },
 					),
-				onCloseTab: (tab) => send({ type: "closeTab", tabId: tab.id }),
+				onCloseTab: (tab) => send({ type: "closeTab", tabId: tab.id, profile: tab.profile }),
 				onClose: hide,
 			});
 		}
@@ -230,6 +232,104 @@
 		const result = await send({ type: "tabs", search: true });
 		if (s.isOpen && result) s.setTabs(result.tabs, result.closed);
 		if (!wasOpen) report({ searchTabsMs: Date.now() - timing.pageAt });
+		// then other profiles' tabs, when the profile helper is set up
+		if (wasOpen || !result) return;
+		const elsewhere = await send({ type: "tabsElsewhere" });
+		if (elsewhere?.tabs?.length || elsewhere?.closed?.length) s.addResults(elsewhere.tabs, elsewhere.closed);
+	}
+
+	// --- notices from profiles.js: a link moved here, or a page open elsewhere ---
+
+	const TOAST_FOR = 8000;
+	const TOAST_STYLE = `
+:host { all: initial; }
+.toast {
+	--bg: rgba(250, 250, 252, 0.92);
+	--fg: #1d1d1f;
+	--line: rgba(0, 0, 0, 0.1);
+	--accent: #3b6cf6;
+	position: fixed;
+	inset: auto 16px 16px auto;
+	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	max-width: min(420px, calc(100vw - 32px));
+	padding: 8px 8px 8px 14px;
+	font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+	color: var(--fg);
+	background: var(--bg);
+	-webkit-backdrop-filter: blur(24px) saturate(1.6);
+	backdrop-filter: blur(24px) saturate(1.6);
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+	transition: opacity 140ms ease-out, transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@starting-style {
+	.toast:popover-open { opacity: 0; transform: translateY(6px); }
+}
+@media (prefers-color-scheme: dark) {
+	.toast { --bg: rgba(30, 30, 32, 0.92); --fg: #f5f5f7; --line: rgba(255, 255, 255, 0.12); --accent: #5b85ff; }
+}
+.text { flex: 1; min-width: 0; }
+button {
+	flex: none;
+	padding: 5px 10px;
+	font: inherit;
+	font-weight: 500;
+	color: #fff;
+	background: var(--accent);
+	border: 0;
+	border-radius: 8px;
+	cursor: pointer;
+}
+button.dismiss { padding: 5px 8px; color: inherit; background: none; opacity: 0.6; }
+button.dismiss:hover { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+	.toast { transition: none; }
+}
+`;
+	let toastEl = null;
+	let toastTimer = 0;
+
+	function hideToast() {
+		clearTimeout(toastTimer);
+		toastEl?.remove();
+		toastEl = null;
+	}
+
+	function showToast({ id, text, action }) {
+		hideToast();
+		toastEl = document.createElement("tabstack-toast");
+		const root = toastEl.attachShadow({ mode: "closed" });
+		try {
+			const sheet = new CSSStyleSheet();
+			sheet.replaceSync(TOAST_STYLE);
+			root.adoptedStyleSheets = [sheet];
+		} catch {}
+		root.append(Object.assign(document.createElement("style"), { textContent: TOAST_STYLE }));
+		const box = document.createElement("div");
+		box.className = "toast";
+		box.popover = "manual";
+		const label = Object.assign(document.createElement("span"), { className: "text", textContent: text });
+		const go = Object.assign(document.createElement("button"), { textContent: action });
+		go.addEventListener("click", () => {
+			send({ type: "toastAction", id });
+			hideToast();
+		});
+		const dismiss = Object.assign(document.createElement("button"), { className: "dismiss", textContent: "✕" });
+		dismiss.setAttribute("aria-label", "Dismiss");
+		dismiss.addEventListener("click", hideToast);
+		box.append(label, go, dismiss);
+		root.append(box);
+		(document.body ?? document.documentElement).append(toastEl);
+		box.showPopover();
+		// it stays while the pointer's on it
+		const wait = () => (toastTimer = setTimeout(hideToast, TOAST_FOR));
+		box.addEventListener("pointerenter", () => clearTimeout(toastTimer));
+		box.addEventListener("pointerleave", wait);
+		wait();
 	}
 
 	function onMessage(msg, sender, sendResponse) {
@@ -237,6 +337,7 @@
 		if (msg.type === "cycle") onCycle(msg);
 		else if (msg.type === "modUp") onModUp(msg.key);
 		else if (msg.type === "search") openSearch();
+		else if (msg.type === "toast") showToast(msg);
 		sendResponse({ ok: true });
 	}
 	api.runtime.onMessage.addListener(onMessage);
