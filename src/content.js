@@ -124,6 +124,17 @@
 		if (switcher?.isOpen) e.stopImmediatePropagation();
 	});
 
+	// The page sees typing in the switcher as keys pressed on its own element,
+	// since the search box is in a closed shadow root, so a site with
+	// single-key shortcuts (Gmail's c, to compose) takes them, and cancels the
+	// letter. Like keydown and keyup, they stop here while the switcher's open.
+	// (Not input: the search box listens for that itself.)
+	for (const type of ["keypress", "beforeinput"]) {
+		listen(window, type, (e) => {
+			if (switcher?.isOpen) e.stopImmediatePropagation();
+		});
+	}
+
 	// --- overlay ---
 
 	let showTimer = 0;
