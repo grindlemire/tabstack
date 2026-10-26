@@ -150,8 +150,21 @@ func openSession() (*session, error) {
 	return s, nil
 }
 
+// hubVersions is the version of each running browser's hub, by browser.
+func (s *session) hubVersions() map[string]string {
+	out := map[string]string{}
+	for _, c := range s.hubs {
+		for _, p := range c.peers {
+			if b, _, ok := strings.Cut(p.Info.Where, "/"); ok {
+				out[b] = c.version
+			}
+		}
+	}
+	return out
+}
+
 // find resolves what the command line called a profile: its number in list,
-// its name, or its folder ("Profile 1").
+// its name, its folder ("Profile 1"), or the ID tabs --json gives it.
 func (s *session) find(arg string) (entry, error) {
 	if n, err := strconv.Atoi(arg); err == nil {
 		if n < 1 || n > len(s.entries) {
@@ -161,7 +174,8 @@ func (s *session) find(arg string) (entry, error) {
 	}
 	var hits []entry
 	for _, e := range s.entries {
-		if strings.EqualFold(e.name(), arg) || strings.EqualFold(e.p.name, arg) || strings.EqualFold(e.p.dir, arg) {
+		if strings.EqualFold(e.name(), arg) || strings.EqualFold(e.p.name, arg) || strings.EqualFold(e.p.dir, arg) ||
+			(e.peer != nil && e.peer.Profile == arg) {
 			hits = append(hits, e)
 		}
 	}
@@ -197,6 +211,7 @@ func list(w io.Writer) error {
 		fmt.Fprintln(w, "tabstack isn't installed in any profile here.")
 		return nil
 	}
+	hubs := s.hubVersions()
 	heading := ""
 	for _, e := range s.entries {
 		group := e.b.name
@@ -205,7 +220,11 @@ func list(w io.Writer) error {
 		}
 		if group != heading {
 			heading = group
-			fmt.Fprintln(w, heading)
+			if v, ok := hubs[group]; ok {
+				fmt.Fprintf(w, "%s (helper %s)\n", heading, cmp.Or(v, "older"))
+			} else {
+				fmt.Fprintln(w, heading)
+			}
 		}
 		fmt.Fprintf(w, "  %2d  %-26s %-12s %s\n", e.n, e.name(), e.p.dir, e.state())
 		if e.peer != nil && len(e.peer.Info.Claims) > 0 {
