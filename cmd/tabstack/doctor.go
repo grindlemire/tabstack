@@ -26,7 +26,7 @@ func doctor(w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "tabstack-host %s, %s\n", version, lastingPath(self))
+	fmt.Fprintf(w, "tabstack %s, %s\n", version, lastingPath(self))
 
 	problems := 0
 	bad := func(format string, args ...any) {
@@ -68,7 +68,7 @@ func doctor(w io.Writer) error {
 		case err != nil:
 			bad("can't read the helper's registration: %v", err)
 		case m == nil:
-			bad("the helper isn't registered. Run tabstack-host install.")
+			bad("the helper isn't registered. Run tabstack install.")
 		default:
 			for _, f := range fixed {
 				if strings.HasPrefix(f, b.name+":") {
@@ -77,7 +77,7 @@ func doctor(w io.Writer) error {
 			}
 			switch {
 			case !fileExists(m.Path):
-				bad("registered at %s, which is gone. Run tabstack-host install.", m.Path)
+				bad("registered at %s, which is gone. Run tabstack install.", m.Path)
 			case !sameFile(m.Path, self):
 				note("registered at %s (%s), not this copy, so profiles use that one. Run this copy's install to switch.", m.Path, versionOf(m.Path))
 			default:
@@ -119,14 +119,14 @@ func doctor(w io.Writer) error {
 			case e.p.granted:
 				note("%s: allowed, but not connected. It connects when the profile's open; if it is, reload tabstack on chrome://extensions there.", name)
 			default:
-				note("%s: not set up. Run tabstack-host connect %q.", name, e.p.dir)
+				note("%s: not set up. Run tabstack connect %q.", name, e.p.dir)
 			}
 		}
 	}
 	if others := slices.DeleteFunc(slices.Clone(s.entries), func(e entry) bool { return e.b.name != "" }); len(others) > 0 {
 		fmt.Fprintln(w, "\nOther connected profiles")
 		for _, e := range others {
-			note("%s: connected, but install didn't set it up, so it can't say which profile it is. Run tabstack-host install.", e.name())
+			note("%s: connected, but install didn't set it up, so it can't say which profile it is. Run tabstack install.", e.name())
 		}
 	}
 
@@ -159,7 +159,12 @@ func versionOf(path string) string {
 	if err != nil {
 		return "an older version"
 	}
-	return strings.TrimSpace(strings.TrimPrefix(string(out), "tabstack-host"))
+	// "tabstack 1.2.0", or "tabstack-host 1.1.0" from before the rename
+	f := strings.Fields(string(out))
+	if len(f) == 0 {
+		return "an older version"
+	}
+	return f[len(f)-1]
 }
 
 func lastLines(path string, n int) []string {

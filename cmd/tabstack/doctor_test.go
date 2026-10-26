@@ -26,7 +26,7 @@ func TestDoctor(t *testing.T) {
 		}}})
 	}
 	b := browser{name: "Test", dataDir: data}
-	if err := writeHostManifest(b, filepath.Join(data, "gone", "tabstack-host"), []string{"oldid"}); err != nil {
+	if err := writeHostManifest(b, filepath.Join(data, "gone", "tabstack"), []string{"oldid"}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("TABSTACK_TEST_BROWSER", "Test;"+data+";chrome")

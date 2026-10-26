@@ -111,7 +111,7 @@ func tabs(w io.Writer, args []string) error {
 // focus brings a profile forward, or one of its tabs, in its window.
 func focus(w io.Writer, args []string) error {
 	if len(args) < 1 || len(args) > 2 {
-		return errors.New("tabstack-host focus <profile> [<tab>]")
+		return errors.New("tabstack focus <profile> [<tab>]")
 	}
 	s, err := openSession()
 	if err != nil {
@@ -129,7 +129,7 @@ func focus(w io.Writer, args []string) error {
 	if len(args) == 2 {
 		id, err := strconv.Atoi(args[1])
 		if err != nil {
-			return fmt.Errorf("%q isn't a tab; tabstack-host tabs lists them, with their numbers", args[1])
+			return fmt.Errorf("%q isn't a tab; tabstack tabs lists them, with their numbers", args[1])
 		}
 		body["tabId"] = id
 	}
@@ -187,7 +187,7 @@ func open(w io.Writer, args []string) error {
 		return err
 	}
 	if fs.NArg() == 0 {
-		return errors.New("tabstack-host open [--profile <profile>] <link>...")
+		return errors.New("tabstack open [--profile <profile>] <link>...")
 	}
 	s, err := openSession()
 	if err != nil {

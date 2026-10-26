@@ -104,7 +104,7 @@ func TestWatch(t *testing.T) {
 // upgrades; browsers get the opt link, which follows the upgrade.
 func TestLastingPath(t *testing.T) {
 	prefix := t.TempDir()
-	exe := filepath.Join(prefix, "Cellar", "tabstack-host", "1.2.0", "bin", "tabstack-host")
+	exe := filepath.Join(prefix, "Cellar", "tabstack", "1.2.0", "bin", "tabstack")
 	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -117,14 +117,14 @@ func TestLastingPath(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(prefix, "opt"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("../Cellar/tabstack-host/1.2.0", filepath.Join(prefix, "opt", "tabstack-host")); err != nil {
+	if err := os.Symlink("../Cellar/tabstack/1.2.0", filepath.Join(prefix, "opt", "tabstack")); err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(prefix, "opt", "tabstack-host", "bin", "tabstack-host")
+	want := filepath.Join(prefix, "opt", "tabstack", "bin", "tabstack")
 	if got := lastingPath(exe); got != want {
 		t.Errorf("lastingPath = %s, want %s", got, want)
 	}
-	other := filepath.Join(t.TempDir(), "tabstack-host")
+	other := filepath.Join(t.TempDir(), "tabstack")
 	if got := lastingPath(other); got != other {
 		t.Errorf("outside Homebrew, lastingPath = %s, want the path itself", got)
 	}

@@ -37,7 +37,7 @@ const writeTimeout = time.Second
 //
 // peers goes out to everyone whenever a profile joins, leaves or changes.
 //
-// The command line (tabstack-host install, list and the rest) watches who's
+// The command line (tabstack install, list and the rest) watches who's
 // connected without joining, and can send profiles commands, which arrive
 // from "cli-<n>", where answers to it go:
 //

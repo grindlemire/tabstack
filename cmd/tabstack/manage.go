@@ -168,7 +168,7 @@ func (s *session) hubVersions() map[string]string {
 func (s *session) find(arg string) (entry, error) {
 	if n, err := strconv.Atoi(arg); err == nil {
 		if n < 1 || n > len(s.entries) {
-			return entry{}, fmt.Errorf("there's no profile %d; run tabstack-host list", n)
+			return entry{}, fmt.Errorf("there's no profile %d; run tabstack list", n)
 		}
 		return s.entries[n-1], nil
 	}
@@ -181,7 +181,7 @@ func (s *session) find(arg string) (entry, error) {
 	}
 	switch len(hits) {
 	case 0:
-		return entry{}, fmt.Errorf("no profile called %q; run tabstack-host list", arg)
+		return entry{}, fmt.Errorf("no profile called %q; run tabstack list", arg)
 	case 1:
 		return hits[0], nil
 	}
@@ -336,7 +336,7 @@ func reset(w io.Writer, args []string) error {
 		if back {
 			fmt.Fprintf(w, "Reset %s.\n", cmp.Or(name, e.name()))
 		} else {
-			fmt.Fprintf(w, "Asked %s to reset, but it hasn't come back yet. Check tabstack-host list.\n", e.name())
+			fmt.Fprintf(w, "Asked %s to reset, but it hasn't come back yet. Check tabstack list.\n", e.name())
 		}
 	}
 	if len(todo) == 0 {
@@ -372,7 +372,7 @@ func rename(w io.Writer, arg, name string) error {
 // links lists, adds or removes the links that open in a profile.
 func links(w io.Writer, args []string) error {
 	if len(args) == 0 {
-		return errors.New("links needs a profile: tabstack-host links <profile> [add|remove <pattern>...]")
+		return errors.New("links needs a profile: tabstack links <profile> [add|remove <pattern>...]")
 	}
 	s, err := openSession()
 	if err != nil {
@@ -397,7 +397,7 @@ func links(w io.Writer, args []string) error {
 		return nil
 	}
 	if len(args) < 3 {
-		return errors.New("tabstack-host links <profile> add|remove <pattern>...")
+		return errors.New("tabstack links <profile> add|remove <pattern>...")
 	}
 	next := slices.Clone(current)
 	switch args[1] {

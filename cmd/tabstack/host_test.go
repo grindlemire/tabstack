@@ -146,7 +146,7 @@ func (h *helper) expectNothing(t *testing.T) {
 
 func buildHelper(t *testing.T) (exe, dir string) {
 	t.Helper()
-	exe = filepath.Join(t.TempDir(), "tabstack-host")
+	exe = filepath.Join(t.TempDir(), "tabstack")
 	if out, err := exec.Command("go", "build", "-o", exe, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}

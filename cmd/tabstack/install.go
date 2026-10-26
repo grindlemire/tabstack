@@ -333,7 +333,7 @@ func install(w io.Writer, extraIDs []string) error {
 	}
 	browsers := knownBrowsers(home)
 	if browsers == nil {
-		return fmt.Errorf("tabstack-host doesn't support %s yet", runtime.GOOS)
+		return fmt.Errorf("the helper doesn't run on %s yet", runtime.GOOS)
 	}
 
 	targets, missing, err := register(w, browsers, exe, extraIDs)
@@ -359,7 +359,7 @@ func install(w io.Writer, extraIDs []string) error {
 	}
 	err = connectAll(w, home, targets)
 	for _, t := range missing {
-		fmt.Fprintf(w, "tabstack isn't installed in %s. Install it there, then run tabstack-host connect %q.\n", t.p.name, t.p.dir)
+		fmt.Fprintf(w, "tabstack isn't installed in %s. Install it there, then run tabstack connect %q.\n", t.p.name, t.p.dir)
 	}
 	return err
 }
@@ -458,7 +458,7 @@ func connectAll(w io.Writer, home string, targets []target) error {
 	}
 	if len(missed) > 0 {
 		for _, t := range missed {
-			fmt.Fprintf(w, "%s isn't connected. Run tabstack-host connect %q to try again.\n", t.p.name, t.p.dir)
+			fmt.Fprintf(w, "%s isn't connected. Run tabstack connect %q to try again.\n", t.p.name, t.p.dir)
 		}
 		return errors.New("not every profile connected")
 	}
@@ -525,7 +525,7 @@ func uninstall(w io.Writer) error {
 			return err
 		}
 	}
-	fmt.Fprintln(w, "tabstack-host unregistered.")
+	fmt.Fprintln(w, "The helper is unregistered.")
 	if stillOn == 0 {
 		fmt.Fprintln(w, "Profile features are off in every profile.")
 	}

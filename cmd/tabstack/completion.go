@@ -25,7 +25,7 @@ var commands = []struct {
 	{"tabs", "every profile's tabs, most recent first", ""},
 	{"focus", "bring a profile forward, or one of its tabs", "first"},
 	{"doctor", "check the setup, and fix what it can", ""},
-	{"version", "which tabstack-host this is", ""},
+	{"version", "which version this is", ""},
 	{"completion", "shell completion for bash, zsh or fish", ""},
 }
 
@@ -37,7 +37,7 @@ func completion(w io.Writer, shell string) error {
 		names += " " + c.name
 		// a ' ends a single-quoted string, in zsh by '\'' and in fish by \'
 		described += fmt.Sprintf("\n    '%s:%s'", c.name, strings.ReplaceAll(c.about, "'", `'\''`))
-		fish += fmt.Sprintf("complete -c tabstack-host -n __fish_use_subcommand -a %s -d '%s'\n", c.name, strings.ReplaceAll(c.about, "'", `\'`))
+		fish += fmt.Sprintf("complete -c tabstack -n __fish_use_subcommand -a %s -d '%s'\n", c.name, strings.ReplaceAll(c.about, "'", `\'`))
 		switch c.profiles {
 		case "all":
 			all += "|" + c.name
@@ -81,7 +81,7 @@ func completeProfiles(w io.Writer) error {
 	return nil
 }
 
-const bashCompletion = `_tabstack_host() {
+const bashCompletion = `_tabstack() {
   local cur=${COMP_WORDS[COMP_CWORD]}
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=($(compgen -W "%s" -- "$cur"))
@@ -96,16 +96,16 @@ const bashCompletion = `_tabstack_host() {
   local IFS=$'\n' name
   COMPREPLY=()
   # one at a time: macOS's bash 3.2 joins "${a[@]// /\\ }" into one word
-  for name in $(compgen -W "$(tabstack-host __profiles 2>/dev/null)" -- "$cur"); do
+  for name in $(compgen -W "$(tabstack __profiles 2>/dev/null)" -- "$cur"); do
     COMPREPLY+=("${name// /\\ }")
   done
 }
-complete -F _tabstack_host tabstack-host
+complete -F _tabstack tabstack
 `
 
-const zshCompletion = `#compdef tabstack-host
+const zshCompletion = `#compdef tabstack
 
-_tabstack_host() {
+_tabstack() {
   local -a commands profiles
   commands=(%s
   )
@@ -119,19 +119,19 @@ _tabstack_host() {
     completion) compadd bash zsh fish; return ;;
     *) return ;;
   esac
-  profiles=("${(@f)$(tabstack-host __profiles 2>/dev/null)}")
+  profiles=("${(@f)$(tabstack __profiles 2>/dev/null)}")
   compadd -a profiles
 }
 
-if [ "$funcstack[1]" = "_tabstack_host" ]; then
-  _tabstack_host "$@"
+if [ "$funcstack[1]" = "_tabstack" ]; then
+  _tabstack "$@"
 else
-  compdef _tabstack_host tabstack-host
+  compdef _tabstack tabstack
 fi
 `
 
-const fishProfiles = `complete -c tabstack-host -f
-complete -c tabstack-host -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
-complete -c tabstack-host -n '__fish_seen_subcommand_from %s' -a '(tabstack-host __profiles 2>/dev/null)'
-complete -c tabstack-host -n '__fish_seen_subcommand_from %s; and test (count (commandline -opc)) -eq 2' -a '(tabstack-host __profiles 2>/dev/null)'
+const fishProfiles = `complete -c tabstack -f
+complete -c tabstack -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
+complete -c tabstack -n '__fish_seen_subcommand_from %s' -a '(tabstack __profiles 2>/dev/null)'
+complete -c tabstack -n '__fish_seen_subcommand_from %s; and test (count (commandline -opc)) -eq 2' -a '(tabstack __profiles 2>/dev/null)'
 `

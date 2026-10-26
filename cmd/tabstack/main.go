@@ -1,4 +1,5 @@
-// Command tabstack-host lets tabstack switch between browser profiles.
+// Command tabstack is the command line for the tabstack extension, and the
+// helper that lets it work across browser profiles.
 //
 // Each profile runs its own copy of the extension, and extensions can't talk
 // across profiles, so each copy connects to this helper over native messaging.
@@ -19,28 +20,29 @@ import (
 	"strings"
 )
 
-const usage = `tabstack-host lets tabstack work across your browser profiles.
+const usage = `tabstack is the command line for the tabstack browser extension,
+and the helper that lets it work across your browser profiles.
 
 Usage:
-  tabstack-host install                  find tabstack in every profile, register the
-                                         helper, and connect each profile
-  tabstack-host list                     every profile, numbered, and how it's connected
-  tabstack-host connect <profile>...     connect profiles (one click in each)
-  tabstack-host disconnect <profile>...  stop profiles connecting; --all for every one
-  tabstack-host reset <profile>...       clear a profile's name and links, and reconnect it
-  tabstack-host rename <profile> <name>  change the name other profiles show
-  tabstack-host links <profile> [add|remove <pattern>...]
-                                         the links that open in a profile
-  tabstack-host uninstall                disconnect every profile and unregister the helper
+  tabstack install                  find tabstack in every profile, register the
+                                    helper, and connect each profile
+  tabstack list                     every profile, numbered, and how it's connected
+  tabstack connect <profile>...     connect profiles (one click in each)
+  tabstack disconnect <profile>...  stop profiles connecting; --all for every one
+  tabstack reset <profile>...       clear a profile's name and links, and reconnect it
+  tabstack rename <profile> <name>  change the name other profiles show
+  tabstack links <profile> [add|remove <pattern>...]
+                                    the links that open in a profile
+  tabstack uninstall                disconnect every profile and unregister the helper
 
-  tabstack-host open [--profile <profile>] <link>...
-                                         open links in the profile they belong to
-  tabstack-host tabs [--json] [<words>]  every profile's tabs, most recent first
-  tabstack-host focus <profile> [<tab>]  bring a profile forward, or one of its tabs
+  tabstack open [--profile <profile>] <link>...
+                                    open links in the profile they belong to
+  tabstack tabs [--json] [<words>]  every profile's tabs, most recent first
+  tabstack focus <profile> [<tab>]  bring a profile forward, or one of its tabs
 
-  tabstack-host doctor                   check the setup, and fix what it can
-  tabstack-host completion bash|zsh|fish shell completion for these commands
-  tabstack-host version                  which tabstack-host this is
+  tabstack doctor                   check the setup, and fix what it can
+  tabstack completion bash|zsh|fish shell completion for these commands
+  tabstack version                  which version this is
 
 A <profile> is its number from list, its name, or its folder ("Profile 1").
 
@@ -52,7 +54,7 @@ profile, since Chrome only grants the permission there.
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "tabstack-host:", err)
+		fmt.Fprintln(os.Stderr, "tabstack:", err)
 		os.Exit(1)
 	}
 }
@@ -84,7 +86,7 @@ func run(args []string, stdout io.Writer) error {
 		return list(stdout)
 	case "connect", "reset":
 		if len(args) == 0 {
-			return fmt.Errorf("%s needs a profile; run tabstack-host list to see them", cmd)
+			return fmt.Errorf("%s needs a profile; run tabstack list to see them", cmd)
 		}
 		if cmd == "connect" {
 			return connect(stdout, args)
@@ -94,13 +96,13 @@ func run(args []string, stdout io.Writer) error {
 		all := slices.Contains(args, "--all")
 		args = slices.DeleteFunc(args, func(a string) bool { return a == "--all" })
 		if len(args) == 0 && !all {
-			return errors.New("disconnect needs a profile, or --all; run tabstack-host list to see them")
+			return errors.New("disconnect needs a profile, or --all; run tabstack list to see them")
 		}
 		_, err := disconnect(stdout, args, all)
 		return err
 	case "rename":
 		if len(args) != 2 {
-			return errors.New("tabstack-host rename <profile> <name>")
+			return errors.New("tabstack rename <profile> <name>")
 		}
 		return rename(stdout, args[0], args[1])
 	case "links":
@@ -111,7 +113,7 @@ func run(args []string, stdout io.Writer) error {
 		return doctor(stdout)
 	case "completion":
 		if len(args) != 1 {
-			return errors.New("tabstack-host completion bash|zsh|fish")
+			return errors.New("tabstack completion bash|zsh|fish")
 		}
 		return completion(stdout, args[0])
 	case "__profiles":
@@ -123,7 +125,7 @@ func run(args []string, stdout io.Writer) error {
 	case "focus":
 		return focus(stdout, args)
 	case "version", "--version":
-		fmt.Fprintln(stdout, "tabstack-host", version)
+		fmt.Fprintln(stdout, "tabstack", version)
 		return nil
 	case "", "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)

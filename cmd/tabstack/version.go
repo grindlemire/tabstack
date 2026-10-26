@@ -34,7 +34,7 @@ func selfPath() (string, error) {
 
 // helperPath is where browsers should find this binary: by a path that
 // lasts. Under Homebrew that's the opt link, which follows upgrades, rather
-// than the versioned folder it runs from (…/Cellar/tabstack-host/1.2.0/bin),
+// than the versioned folder it runs from (…/Cellar/tabstack/1.2.0/bin),
 // which goes when it upgrades.
 func helperPath() (string, error) {
 	exe, err := selfPath()
