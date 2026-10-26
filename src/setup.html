@@ -173,9 +173,92 @@
 			button.danger { color: var(--error); background: none; padding-left: 4px; }
 			code.inline { flex: none; padding: 1px 5px; font-size: 12px; white-space: nowrap; }
 			.status:empty { display: none; }
+			/* the first thing in its card, once Allow is done with */
+			#allow[hidden] + .status { margin-top: 0; }
 			.status.ok { color: var(--ok); }
 			.status.error { color: var(--error); }
 			.after { margin: 20px 4px 0; color: var(--muted); }
+
+			/* what you get, ticked off */
+			ul.gets { padding-left: 0; list-style: none; }
+			ul.gets li { position: relative; padding-left: 26px; }
+			ul.gets li::before { content: "✓"; position: absolute; left: 3px; font-weight: 700; color: var(--accent); }
+
+			/* the page opens under a soft wash of the accent */
+			body { background: radial-gradient(640px 280px at 50% -60px, var(--accent-soft), transparent 70%) no-repeat, var(--bg); }
+
+			/* --- motion --- */
+
+			/* each part settles in as its section shows: the page opening, then
+			   Allow, then this profile's settings once it's connected */
+			header, section > *, ul.gets li, .steps > li { animation: rise 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+			section > ul.gets, section > .steps { animation: none; }
+			section > :nth-child(2) { animation-delay: 0.06s; }
+			section > :nth-child(3) { animation-delay: 0.12s; }
+			section > :nth-child(n + 4) { animation-delay: 0.18s; }
+			ul.gets li:nth-child(1) { animation-delay: 0.08s; }
+			ul.gets li:nth-child(2) { animation-delay: 0.12s; }
+			ul.gets li:nth-child(3) { animation-delay: 0.16s; }
+			ul.gets li:nth-child(4) { animation-delay: 0.2s; }
+			ul.gets li:nth-child(5) { animation-delay: 0.24s; }
+			.steps > li:nth-child(1) { animation-delay: 0.28s; }
+			.steps > li:nth-child(2) { animation-delay: 0.36s; }
+			@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+
+			/* buttons dip when pressed; the main one brightens under the pointer */
+			button { transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, filter 0.15s ease; }
+			button:active:not(:disabled) { transform: scale(0.97); }
+			button.primary { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
+			button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+			button:disabled { cursor: default; }
+			/* at work: a spinner after the label */
+			button.busy::after {
+				content: "";
+				display: inline-block;
+				width: 11px;
+				height: 11px;
+				margin-left: 8px;
+				vertical-align: -1px;
+				border: 2px solid currentColor;
+				border-right-color: transparent;
+				border-radius: 50%;
+				animation: spin 0.7s linear infinite;
+			}
+			@keyframes spin { to { transform: rotate(360deg); } }
+			button.copied { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+			button.success { color: #fff; background: var(--ok); box-shadow: none; }
+			.pop { animation: pop 0.3s cubic-bezier(0.3, 1.5, 0.5, 1); }
+			@keyframes pop { 40% { transform: scale(1.06); } }
+
+			/* a status line: new words fade in, a problem shakes, and connecting ticks */
+			.appear { animation: appear 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+			@keyframes appear { from { opacity: 0; transform: translateY(-3px); } }
+			.shake { animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+			@keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+			.status.ok::before {
+				content: "✓";
+				display: inline-grid;
+				place-items: center;
+				width: 18px;
+				height: 18px;
+				margin-right: 8px;
+				vertical-align: -3px;
+				font-size: 11px;
+				font-weight: 700;
+				color: var(--group);
+				background: var(--ok);
+				border-radius: 50%;
+				animation: tick 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+			}
+			@keyframes tick { from { transform: scale(0); } }
+
+			/* Done: the page fades as the tab closes */
+			main { transition: opacity 0.3s ease, transform 0.3s ease; }
+			body.closing main { opacity: 0; transform: scale(0.98); }
+
+			@media (prefers-reduced-motion: reduce) {
+				*:not(button.busy)::after, *, *::before { animation: none !important; transition: none !important; }
+			}
 		</style>
 	</head>
 	<body>
@@ -233,7 +316,7 @@
 				</div>
 			</section>
 
-			<!-- opened from tabstack's popup, once this profile is set up -->
+			<!-- opened once this profile is set up, as after the restart connecting can need -->
 			<section id="manage" hidden>
 				<div class="card">
 					<div class="status" id="manage-status"></div>

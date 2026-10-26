@@ -3,8 +3,9 @@
 // tabstack-host install opens this page in each profile it finds tabstack in,
 // saying which profile it is (where) and what the browser calls it (name):
 // then it's one Allow button, since Chrome only grants the permission on a
-// click. Opened from tabstack's popup instead, it explains how to get there,
-// or once the profile's set up, shows its connection and settings.
+// click. Opened from tabstack's popup instead, it explains how to get there.
+// Opened once the profile's set up (as it is after the restart connecting can
+// need), it shows its connection and settings.
 
 const { api } = TabstackShared;
 const $ = (id) => document.getElementById(id);
@@ -33,11 +34,42 @@ if (fromCli) {
 	});
 }
 
+// --- motion (the animations are in setup.html) ---
+
+// Plays an animation on an element from the start, and takes it off once it ends.
+function play(el, name) {
+	el.classList.remove(name);
+	void el.offsetWidth; // restarts the animation
+	el.classList.add(name);
+	el.addEventListener("animationend", () => el.classList.remove(name), { once: true });
+}
+
+// A status line, whose words fade in when they change, or shake when
+// something went wrong. The page redraws it every POLL ms, so it only moves
+// when it says something new.
+function setStatus(el, kind, text) {
+	const changed = el.textContent !== text;
+	el.className = kind ? `status ${kind}` : "status";
+	el.textContent = text;
+	if (changed && text) play(el, kind === "error" ? "shake" : "appear");
+}
+
+// A button's working state: a spinner, and no second click.
+function busy(button, on) {
+	button.classList.toggle("busy", on);
+	button.disabled = on;
+}
+
 for (const button of document.querySelectorAll("[data-copy]")) {
 	button.addEventListener("click", async () => {
 		await navigator.clipboard.writeText($(button.dataset.copy).textContent);
 		button.textContent = "Copied";
-		setTimeout(() => (button.textContent = "Copy"), 1500);
+		button.classList.add("copied");
+		play(button, "pop");
+		setTimeout(() => {
+			button.textContent = "Copy";
+			button.classList.remove("copied");
+		}, 1500);
 	});
 }
 
@@ -45,6 +77,7 @@ for (const button of document.querySelectorAll("[data-copy]")) {
 // status every POLL ms, which would otherwise wipe it.
 let problem = "";
 let autoConnected = false;
+let connecting = false; // the poll waits while Allow or Reconnect is under way
 
 // Which page this is: install's Allow page, the setup steps, or, once this
 // profile is set up, its connection.
@@ -56,21 +89,18 @@ function showPage(status) {
 	if (page === "manage") $("title").textContent = "Profile connections";
 	else if (page === "steps") $("title").textContent = "Work across your Chrome profiles";
 	if (page !== "manage") return;
-	const el = $("manage-status");
 	if (status.connected) {
 		const names = status.peers.map((p) => (p.self ? `${p.name} (this one)` : p.name));
-		el.className = "status ok";
-		el.textContent = `Connected. Profiles: ${names.join(", ")}`;
+		setStatus($("manage-status"), "ok", `Connected. Profiles: ${names.join(", ")}`);
 	} else {
-		el.className = "status error";
-		el.textContent = `This profile can't reach the helper${status.error ? ` (${status.error})` : ""}. Check that tabstack-host is installed, then reconnect.`;
+		const why = status.error ? ` (${status.error})` : "";
+		setStatus($("manage-status"), "error", `This profile can't reach the helper${why}. Check that tabstack-host is installed, then reconnect.`);
 	}
 }
 
 function show(status) {
 	showPage(status);
 	const el = $("status");
-	el.className = "status";
 	$("settings").hidden = !status?.connected;
 	$("done-row").hidden = !run || !status?.connected;
 	// install's pages end with Done, and the connection page needs no sign-off
@@ -79,22 +109,21 @@ function show(status) {
 	$("cli-lede").hidden = !!status?.connected;
 	$("connect-here").parentElement.hidden = !!status?.connected;
 	if (!status?.granted) {
-		el.classList.toggle("error", !!problem);
-		el.textContent = problem;
+		setStatus(el, problem ? "error" : "", problem);
 		$("allow").hidden = false;
 		return;
 	}
 	if (!status.connected) {
-		el.classList.add("error");
-		el.textContent = `tabstack can't reach the helper${status.error ? ` (${status.error})` : ""}. Run tabstack-host install, then try again.`;
+		const why = status.error ? ` (${status.error})` : "";
+		setStatus(el, "error", `tabstack can't reach the helper${why}. Run tabstack-host install, then try again.`);
 		$("allow").hidden = false;
 		$("allow").textContent = "Try again";
 		return;
 	}
-	el.classList.add("ok");
 	const names = status.peers.map((p) => (p.self ? `${p.name} (this one)` : p.name));
-	el.textContent = `Connected. Profiles so far: ${names.join(", ")}`;
-	if (run) el.textContent += ". Name this profile below, then click Done.";
+	let text = `Connected. Profiles so far: ${names.join(", ")}`;
+	if (run) text += ". Name this profile below, then click Done.";
+	setStatus(el, "ok", text);
 	$("allow").hidden = true;
 }
 
@@ -118,6 +147,7 @@ async function showKeys() {
 }
 
 async function refresh() {
+	if (connecting) return;
 	const status = await api.runtime.sendMessage({ type: "profiles" }).catch(() => null);
 	// allowed before, but the helper wasn't registered then: connect now
 	if (fromCli && status?.granted && !status.connected && !autoConnected) {
@@ -144,9 +174,13 @@ async function connect() {
 		return;
 	}
 	problem = "";
-	$("status").className = "status";
-	$("status").textContent = "Connecting…";
-	show(await api.runtime.sendMessage({ type: "profilesConnect" }));
+	connecting = true;
+	busy($("allow"), true);
+	setStatus($("status"), "", "Connecting…");
+	const status = await api.runtime.sendMessage({ type: "profilesConnect" });
+	connecting = false;
+	busy($("allow"), false);
+	show(status);
 }
 
 $("allow").addEventListener("click", connect);
@@ -158,9 +192,13 @@ $("connect-here").addEventListener("click", () => {
 });
 
 $("reconnect").addEventListener("click", async () => {
-	$("manage-status").className = "status";
-	$("manage-status").textContent = "Reconnecting…";
-	show(await api.runtime.sendMessage({ type: "profilesConnect" }));
+	connecting = true;
+	busy($("reconnect"), true);
+	setStatus($("manage-status"), "", "Reconnecting…");
+	const status = await api.runtime.sendMessage({ type: "profilesConnect" });
+	connecting = false;
+	busy($("reconnect"), false);
+	show(status);
 });
 
 // like "Turn off profile features" in the popup; back to the setup steps
@@ -187,7 +225,9 @@ $("links").addEventListener("change", saveLinks);
 // Saves what's on the page and tells tabstack-host install this profile is
 // set up, so it moves on to the next one.
 async function finish() {
+	if ($("done").disabled) return;
 	clearTimeout(nameTimer);
+	busy($("done"), true);
 	await Promise.all([saveName(), saveLinks()]);
 	await api.storage.local.set({ setupDone: run });
 	// The background passes it on to install. This page is read from disk
@@ -199,12 +239,22 @@ async function finish() {
 		const status = await api.runtime.sendMessage({ type: "profiles" }).catch(() => null);
 		took = status?.done === run;
 	}
-	$("done-status").className = took ? "status ok" : "status error";
-	$("done-status").textContent = took
-		? "Saved. tabstack-host moves on to your next profile, if there is one."
-		: "Saved, but tabstack's background didn't pass it on. Reload tabstack on chrome://extensions, then click Done again.";
-	// this tab's work is done; a moment to read that it saved, then it goes
-	if (took) setTimeout(async () => api.tabs.remove((await api.tabs.getCurrent()).id), CLOSE_AFTER);
+	busy($("done"), false);
+	setStatus(
+		$("done-status"),
+		took ? "ok" : "error",
+		took
+			? "Saved. tabstack-host moves on to your next profile, if there is one."
+			: "Saved, but tabstack's background didn't pass it on. Reload tabstack on chrome://extensions, then click Done again.",
+	);
+	if (!took) return;
+	// this tab's work is done: a moment to read that it saved, then it fades
+	// and goes
+	$("done").classList.add("success");
+	$("done").textContent = "Saved";
+	$("done").disabled = true;
+	setTimeout(() => document.body.classList.add("closing"), CLOSE_AFTER - 300);
+	setTimeout(async () => api.tabs.remove((await api.tabs.getCurrent()).id), CLOSE_AFTER);
 }
 $("done").addEventListener("click", finish);
 
