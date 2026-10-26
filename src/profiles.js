@@ -193,6 +193,9 @@ globalThis.TabstackProfiles = (() => {
 			publishLabel();
 		} else if (msg.type === "msg") {
 			onBody(msg.from, msg.body ?? {});
+		} else if (msg.type === "reconnect") {
+			// a new helper is installed; connecting again starts it
+			reconnect();
 		}
 	}
 
@@ -230,7 +233,7 @@ globalThis.TabstackProfiles = (() => {
 	}
 
 	async function onBody(from, body) {
-		if (from === "cli") return fromCommandLine(body);
+		if (from.startsWith("cli")) return fromCommandLine(from, body);
 		switch (body.kind) {
 			case "reply": {
 				const entry = pending.get(body.rid);
@@ -272,10 +275,35 @@ globalThis.TabstackProfiles = (() => {
 		}
 	}
 
-	// tabstack-host's commands for managing profiles (tabstack-host/manage.go). It
-	// watches the list of profiles to see them take effect.
-	async function fromCommandLine(body) {
+	// tabstack-host's commands (tabstack-host/manage.go and tabs.go). Some it
+	// sees take effect in the list of profiles; the rest are answered.
+	async function fromCommandLine(from, body) {
 		switch (body.kind) {
+			case "tabs": {
+				// every tab, most recently used first, without icons
+				const tabs = await api.tabs.query({});
+				tabs.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
+				reply(from, body.rid, {
+					tabs: tabs.map((t) => ({ id: t.id, windowId: t.windowId, title: t.title, url: t.url, lastAccessed: t.lastAccessed })),
+				});
+				return;
+			}
+			case "focus": {
+				let win = await lastWindow();
+				if (body.tabId != null) {
+					const tab = await api.tabs.update(body.tabId, { active: true }).catch(() => null);
+					if (!tab) return reply(from, body.rid, { error: `there's no tab ${body.tabId} here` });
+					win = await api.windows.get(tab.windowId).catch(() => null);
+				}
+				if (!win) return reply(from, body.rid, { error: "it has no window open" });
+				await present(win);
+				reply(from, body.rid, { ok: true });
+				return;
+			}
+			case "open":
+				await openHere(from, { url: body.url });
+				reply(from, body.rid, { ok: true });
+				return;
 			case "forget":
 				// like "Turn off profile features" in the popup, which offers
 				// to turn them back on

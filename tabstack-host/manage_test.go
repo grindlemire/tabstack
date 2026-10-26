@@ -1,8 +1,10 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFind(t *testing.T) {
@@ -43,7 +45,7 @@ func TestFind(t *testing.T) {
 }
 
 // The command line watches the hub and can send a profile a command, which
-// arrives from "cli".
+// arrives from the watcher's address, and gather the answers.
 func TestCommandLineSends(t *testing.T) {
 	exe, dir := buildHelper(t)
 	a, b := startHelper(t, exe, dir), startHelper(t, exe, dir)
@@ -60,8 +62,55 @@ func TestCommandLineSends(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := b.expect(t, "msg")
-	if body := got["body"].(map[string]any); got["from"] != "cli" || body["kind"] != "rename" {
+	from, _ := got["from"].(string)
+	if body := got["body"].(map[string]any); !strings.HasPrefix(from, "cli-") || body["kind"] != "rename" {
 		t.Errorf("b got %v", got)
 	}
+	a.expectNothing(t)
+
+	// each profile answers, to the watcher that asked
+	answers := make(chan []answer)
+	go func() {
+		got, err := live[0].ask("*", map[string]any{"kind": "tabs"}, 3*time.Second)
+		if err != nil {
+			t.Error(err)
+		}
+		answers <- got
+	}()
+	for _, h := range []*helper{a, b} {
+		m := h.expect(t, "msg")
+		body := m["body"].(map[string]any)
+		h.send(t, sendTo(m["from"].(string), map[string]any{"kind": "reply", "rid": body["rid"], "tabs": []any{}}))
+	}
+	if got := <-answers; len(got) != 2 {
+		t.Errorf("ask got %d answers, want 2", len(got))
+	}
+}
+
+// Once a new helper is installed where browsers start this one, each
+// profile is asked to connect again, so the browser starts the new one.
+func TestMovesToNewBinary(t *testing.T) {
+	exe, dir := buildHelper(t)
+	t.Setenv("TABSTACK_TEST_EXE_CHECK", "100ms")
+	a, b := startHelper(t, exe, dir), startHelper(t, exe, dir)
+	a.send(t, state("1", 1))
+	b.send(t, state("2", 1))
+	a.expectPeers(t, "1", "2")
+	a.expectNothing(t)
+
+	// a new build, by renaming over it, as go install does
+	raw, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe+".new", raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(exe+".new", exe); err != nil {
+		t.Fatal(err)
+	}
+	a.expect(t, "reconnect")
+	b.expect(t, "reconnect")
+	// and only once
 	a.expectNothing(t)
 }

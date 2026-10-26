@@ -98,6 +98,8 @@ func relay(base string, in io.Reader, out io.Writer) error {
 		}
 	}()
 
+	self, _ := selfPath()
+	hello, _ := json.Marshal(message{Type: "hello", Version: version, Binary: fileID(self)})
 	var state []byte // the profile's last state message
 	for {
 		conn, err := joinHub(base)
@@ -117,8 +119,8 @@ func relay(base string, in io.Reader, out io.Writer) error {
 			}
 		}()
 
-		err = nil
-		if state != nil {
+		err = send(conn, hello)
+		if err == nil && state != nil {
 			err = send(conn, state)
 		}
 		for err == nil {
@@ -216,5 +218,6 @@ func becomeHub(base string) (*hub, error) {
 	h := &hub{lock: f, peers: map[*peer]bool{}}
 	log.Printf("hub: listening on %s", sock)
 	go h.serve(ln)
+	go h.watchExe()
 	return h, nil
 }

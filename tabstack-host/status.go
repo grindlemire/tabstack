@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -11,6 +14,7 @@ import (
 type hubPeer struct {
 	Profile string `json:"profile"`
 	Windows int    `json:"windows"`
+	Version string `json:"version"` // of the helper passing its messages on
 	Info    struct {
 		Name   string   `json:"name"`
 		Where  string   `json:"where"` // browser/profile folder, once set up by install
@@ -24,10 +28,11 @@ type hubPeer struct {
 // hubClient watches a hub, one per running browser, and sends its profiles
 // commands.
 type hubClient struct {
-	conn  net.Conn
-	enc   *json.Encoder
-	dec   *json.Decoder
-	peers []hubPeer
+	conn    net.Conn
+	enc     *json.Encoder
+	dec     *json.Decoder
+	peers   []hubPeer
+	version string // the hub's
 }
 
 func dialHub(sock string) (*hubClient, error) {
@@ -49,19 +54,79 @@ func dialHub(sock string) (*hubClient, error) {
 	return c, nil
 }
 
+// fromHub is anything the hub sends a watcher.
+type fromHub struct {
+	Type    string          `json:"type"`
+	Peers   []hubPeer       `json:"peers"`
+	Version string          `json:"version"`
+	From    string          `json:"from"`
+	Body    json.RawMessage `json:"body"`
+}
+
+// read takes the hub's next message, keeping up with who's connected.
+func (c *hubClient) read() (fromHub, error) {
+	var m fromHub
+	if err := c.dec.Decode(&m); err != nil {
+		return m, err
+	}
+	if m.Type == "peers" {
+		c.peers, c.version = m.Peers, m.Version
+	}
+	return m, nil
+}
+
 // next reads the hub's next list of who's connected.
 func (c *hubClient) next() error {
-	var m struct {
-		Type  string    `json:"type"`
-		Peers []hubPeer `json:"peers"`
-	}
-	for m.Type != "peers" {
-		if err := c.dec.Decode(&m); err != nil {
+	for {
+		m, err := c.read()
+		if err != nil || m.Type == "peers" {
 			return err
 		}
 	}
-	c.peers = m.Peers
-	return nil
+}
+
+// answer is one profile's answer to ask.
+type answer struct {
+	From string
+	Body json.RawMessage
+}
+
+// ask sends a profile a request, or every profile when to is "*", and
+// gathers the answers until each has answered or the time's up. Profiles
+// match an answer to its request by rid.
+func (c *hubClient) ask(to string, body map[string]any, timeout time.Duration) ([]answer, error) {
+	want := 1
+	if to == "*" {
+		want = len(c.peers)
+	}
+	rid := rand.Text()
+	req := map[string]any{"rid": rid}
+	for k, v := range body {
+		req[k] = v
+	}
+	if err := c.send(to, req); err != nil {
+		return nil, err
+	}
+	c.conn.SetReadDeadline(time.Now().Add(timeout))
+	defer c.conn.SetReadDeadline(time.Time{})
+	var got []answer
+	for len(got) < want {
+		m, err := c.read()
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			break
+		}
+		if err != nil {
+			return got, err
+		}
+		var r struct {
+			Kind string `json:"kind"`
+			Rid  string `json:"rid"`
+		}
+		if m.Type == "msg" && json.Unmarshal(m.Body, &r) == nil && r.Kind == "reply" && r.Rid == rid {
+			got = append(got, answer{m.From, m.Body})
+		}
+	}
+	return got, nil
 }
 
 func (c *hubClient) send(to string, body any) error {

@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,19 +24,22 @@ const writeTimeout = time.Second
 //
 // From a profile:
 //
+//	{"type":"hello","version":"1.2.0","binary":"<file>"}         the helper passing its messages on, first thing
 //	{"type":"state","profile":"<id>","windows":2,"info":{...}}  joined, or something about it changed
 //	{"type":"send","to":"<id>","body":{...}}                     for one profile; "*" for every other one
 //
 // To a profile:
 //
-//	{"type":"peers","peers":[{"profile":"<id>","windows":2,"info":{...}}, ...]}  everyone connected, itself included
+//	{"type":"peers","version":"1.2.0","peers":[{"profile":"<id>","windows":2,"version":"1.2.0","info":{...}}, ...]}
+//	    everyone connected, itself included, and the hub's version
 //	{"type":"msg","from":"<id>","body":{...}}
+//	{"type":"reconnect"}  a new helper is installed: connect again, so the browser starts it
 //
 // peers goes out to everyone whenever a profile joins, leaves or changes.
 //
 // The command line (tabstack-host install, list and the rest) watches who's
 // connected without joining, and can send profiles commands, which arrive
-// from "cli":
+// from "cli-<n>", where answers to it go:
 //
 //	{"type":"watch"}  answered with peers, now and on every change
 type hub struct {
@@ -40,15 +47,19 @@ type hub struct {
 
 	mu    sync.Mutex
 	peers map[*peer]bool
+	clis  int // watchers so far, to give each an address
 }
 
 type peer struct {
 	conn    net.Conn
 	enc     *json.Encoder
-	watch   bool // only listening, for the command line
+	cli     string // a watcher's address, for the command line
 	profile string
 	windows int
 	info    json.RawMessage
+	version string // of its helper
+	binary  string // its helper's file (fileID)
+	asked   string // the file it was last asked to move to
 }
 
 type message struct {
@@ -60,11 +71,14 @@ type message struct {
 	From    string          `json:"from,omitempty"`
 	Body    json.RawMessage `json:"body,omitempty"`
 	Peers   []peerInfo      `json:"peers,omitempty"`
+	Version string          `json:"version,omitempty"`
+	Binary  string          `json:"binary,omitempty"`
 }
 
 type peerInfo struct {
 	Profile string          `json:"profile"`
 	Windows int             `json:"windows"`
+	Version string          `json:"version,omitempty"`
 	Info    json.RawMessage `json:"info,omitempty"`
 }
 
@@ -103,14 +117,17 @@ func (h *hub) handle(conn net.Conn) {
 		}
 		h.mu.Lock()
 		switch m.Type {
+		case "hello":
+			p.version, p.binary = m.Version, m.Binary
 		case "state":
 			p.profile, p.windows, p.info = m.Profile, m.Windows, m.Info
 			h.announce()
 		case "watch":
-			p.watch = true
+			h.clis++
+			p.cli = fmt.Sprintf("cli-%d", h.clis)
 			h.write(p, h.peerList())
 		case "send":
-			if p.profile != "" || p.watch {
+			if p.profile != "" || p.cli != "" {
 				h.forward(p, m)
 			}
 		}
@@ -123,7 +140,7 @@ func (h *hub) handle(conn net.Conn) {
 func (h *hub) announce() {
 	m := h.peerList()
 	for p := range h.peers {
-		if p.profile != "" || p.watch {
+		if p.profile != "" || p.cli != "" {
 			h.write(p, m)
 		}
 	}
@@ -132,23 +149,83 @@ func (h *hub) announce() {
 func (h *hub) peerList() message {
 	list := []peerInfo{}
 	for _, p := range h.sorted() {
-		list = append(list, peerInfo{Profile: p.profile, Windows: p.windows, Info: p.info})
+		list = append(list, peerInfo{Profile: p.profile, Windows: p.windows, Version: p.version, Info: p.info})
 	}
-	return message{Type: "peers", Peers: list}
+	return message{Type: "peers", Version: version, Peers: list}
 }
 
-// forward passes a message on to the profile it's for, or to every profile
-// but the sender's. Called with h.mu held.
+// forward passes a message on to the profile or watcher it's for, or to
+// every profile but the sender's. Called with h.mu held.
 func (h *hub) forward(from *peer, m message) {
-	sender := from.profile
-	if sender == "" {
-		sender = "cli"
+	out := message{Type: "msg", From: from.profile, Body: m.Body}
+	if from.profile == "" {
+		out.From = from.cli
 	}
-	out := message{Type: "msg", From: sender, Body: m.Body}
 	for _, p := range h.sorted() {
 		if p != from && (m.To == "*" || m.To == p.profile) {
 			h.write(p, out)
 		}
+	}
+	for p := range h.peers {
+		if p.cli != "" && p.cli == m.To {
+			h.write(p, out)
+		}
+	}
+}
+
+// exeCheck is how often the hub looks for a new helper installed where
+// browsers start this one.
+var exeCheck = 30 * time.Second
+
+// watchExe moves every profile to a new helper once one's installed in this
+// one's place (by brew upgrade, or go install), rather than leaving them on
+// this one until the browser restarts. Each profile whose helper is another
+// build is asked, once, to connect again, and the browser starts the new one
+// for it. The profile whose helper is the hub goes too, so the hub moves.
+func (h *hub) watchExe() {
+	path, err := helperPath()
+	if err != nil {
+		return
+	}
+	if d, err := time.ParseDuration(os.Getenv("TABSTACK_TEST_EXE_CHECK")); err == nil {
+		exeCheck = d
+	}
+	runs := map[string]bool{} // builds found at path that answered
+	for range time.Tick(exeCheck) {
+		id := fileID(path)
+		if id == "" {
+			continue
+		}
+		h.mu.Lock()
+		var stale []*peer
+		for p := range h.peers {
+			if p.profile != "" && p.binary != id && p.asked != id {
+				stale = append(stale, p)
+			}
+		}
+		h.mu.Unlock()
+		if len(stale) == 0 {
+			continue
+		}
+		if !runs[id] {
+			// one still being written doesn't run yet
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			out, err := exec.CommandContext(ctx, path, "version").Output()
+			cancel()
+			if err != nil {
+				continue
+			}
+			runs[id] = true
+			log.Printf("hub: %s is now %s; moving profiles to it", path, strings.TrimSpace(string(out)))
+		}
+		h.mu.Lock()
+		for _, p := range stale {
+			if h.peers[p] {
+				p.asked = id
+				h.write(p, message{Type: "reconnect"})
+			}
+		}
+		h.mu.Unlock()
 	}
 }
 
