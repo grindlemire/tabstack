@@ -246,14 +246,33 @@ function lastTab() {
 	}
 }
 
-// Both tabs stay laid out, the one not chosen invisible, so the popup keeps
-// the taller one's size instead of jumping as they switch.
-function selectTab(name) {
+const RESIZE_FOR = 300; // ms, as .panels.resizing's transition
+let resized = 0;
+
+// Each tab is as tall as it needs to be. Chrome sizes the popup to the page,
+// so easing the panel's height from one tab's to the other's (ease) grows or
+// shrinks the popup smoothly, instead of in a jump.
+function selectTab(name, { ease = false } = {}) {
+	const panels = document.querySelector(".panels");
+	const from = panels.offsetHeight;
 	for (const tab of document.querySelectorAll("[data-tab]")) tab.setAttribute("aria-selected", tab.dataset.tab === name);
 	for (const panel of [$("general"), $("profiles")]) {
 		panel.classList.toggle("inactive", panel.id !== name);
 		panel.inert = panel.id !== name;
 	}
+	clearTimeout(resized);
+	panels.classList.remove("resizing");
+	panels.style.height = "";
+	const to = panels.offsetHeight;
+	if (!ease || calm() || from === to) return;
+	panels.style.height = `${from}px`;
+	panels.classList.add("resizing");
+	void panels.offsetHeight; // starts the transition from the old height
+	panels.style.height = `${to}px`;
+	resized = setTimeout(() => {
+		panels.classList.remove("resizing");
+		panels.style.height = "";
+	}, RESIZE_FOR);
 }
 
 const shownTab = () => ($("profiles").classList.contains("inactive") || $("profiles").hidden ? $("general") : $("profiles"));
@@ -263,7 +282,7 @@ for (const tab of document.querySelectorAll("[data-tab]")) {
 		const name = tab.dataset.tab;
 		if (tab.getAttribute("aria-selected") === "true") return;
 		tabPicked = true;
-		selectTab(name);
+		selectTab(name, { ease: true });
 		settle();
 		// Profiles sits to the right of General
 		play($(name), name === "profiles" ? "from-right" : "from-left");

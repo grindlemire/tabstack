@@ -265,10 +265,9 @@
 			label.row { transition: background 0.12s ease; }
 			label.row:hover { background: var(--hover); }
 
-			/* both tabs take the room of the taller one, so switching doesn't resize the popup */
-			.panels { display: grid; }
-			.panels > [role="tabpanel"] { grid-area: 1 / 1; min-width: 0; }
-			.panels > .inactive { visibility: hidden; pointer-events: none; }
+			/* each tab is as tall as it needs; switching eases the popup from one height to the other */
+			.panels > .inactive { display: none; }
+			.panels.resizing { overflow: hidden; transition: height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
 
 			/* a shortcut just set pops in a key at a time; one that won't do shakes */
 			.keys kbd.pop { animation: key-pop 0.28s cubic-bezier(0.3, 1.4, 0.5, 1) both; }
