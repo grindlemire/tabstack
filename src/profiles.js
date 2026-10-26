@@ -26,13 +26,15 @@ globalThis.TabstackProfiles = (() => {
 
 	let hooks = null; // { snapshot, recentlyClosed } from background.js
 	let port = null;
+	let enabled = false; // the helper's permission is granted
 	let connected = false; // the helper answered
 	let lastError = "";
 	let profile = null; // this profile's ID; profiles are listed in the order of their IDs
 	let peers = []; // every connected profile, this one included: { profile, windows, info }
-	// this profile's name, the links that belong to it, and, from tabstack-host
-	// install, where it is and which install run's setup page was finished
-	let local = { name: "", claims: [], where: "", done: "" };
+	// this profile's name, its mark ({ glyph, color }), the links that belong
+	// to it, and, from tabstack-host install, where it is and which install
+	// run's setup page was finished
+	let local = { name: "", mark: null, claims: [], where: "", done: "" };
 	let shared = { values: SHARED_DEFAULTS, at: 0 };
 	let started = null;
 
@@ -61,10 +63,14 @@ globalThis.TabstackProfiles = (() => {
 
 	function start() {
 		started ??= (async () => {
-			if (!(await granted())) return;
+			enabled = await granted();
+			if (!enabled) {
+				publishLabel();
+				return;
+			}
 			const [{ profileId, profileShared, profileWhere, setupDone, reopenSetup }, sync, tabs] = await Promise.all([
 				api.storage.local.get(["profileId", "profileShared", "profileWhere", "setupDone", "reopenSetup"]),
-				api.storage.sync.get(["profileName", "profileClaims"]),
+				api.storage.sync.get(["profileName", "profileMark", "profileClaims"]),
 				api.tabs.query({}),
 			]);
 			// made from the time, so profiles are listed in the order they were set up
@@ -73,10 +79,12 @@ globalThis.TabstackProfiles = (() => {
 			if (profileShared) shared = { ...profileShared, values: { ...SHARED_DEFAULTS, ...profileShared.values } };
 			local = {
 				name: sync.profileName ?? "",
+				mark: sync.profileMark ?? null,
 				claims: sync.profileClaims ?? [],
 				where: profileWhere ?? "",
 				done: setupDone ?? "",
 			};
+			publishLabel();
 			for (const tab of tabs) tabUrls.set(tab.id, tab.url);
 			if (reopenSetup) {
 				api.storage.local.remove("reopenSetup");
@@ -117,6 +125,7 @@ globalThis.TabstackProfiles = (() => {
 			connected = false;
 			peers = [];
 			updateMenus();
+			publishLabel();
 		});
 		sendState();
 	}
@@ -127,6 +136,23 @@ globalThis.TabstackProfiles = (() => {
 		connected = false;
 		peers = [];
 		lastError = "";
+	}
+
+	// What this profile shows of itself: its name over search (ui.js), and
+	// its mark as the toolbar icon (background.js). It's kept in storage, so
+	// search has it the moment it opens. A profile with no name yet goes by
+	// its place in the list, once the helper has sent the list. A mark's icon
+	// goes with it, so pages needn't load every icon to show one.
+	let label;
+	function publishLabel() {
+		const name = local.name || (connected ? nameOf(profile) : "");
+		const path = local.mark?.icon && globalThis.TabstackIcons?.[local.mark.icon];
+		const mark = local.mark && { ...local.mark, ...(path && { path }) };
+		const next = enabled && (name || mark) ? { name, mark } : null;
+		if (JSON.stringify(next) === JSON.stringify(label)) return;
+		label = next;
+		if (next) api.storage.local.set({ profileLabel: next });
+		else api.storage.local.remove("profileLabel");
 	}
 
 	async function sendState() {
@@ -154,6 +180,7 @@ globalThis.TabstackProfiles = (() => {
 				}
 			}
 			updateMenus();
+			publishLabel();
 		} else if (msg.type === "msg") {
 			onBody(msg.from, msg.body ?? {});
 		}
@@ -639,12 +666,21 @@ globalThis.TabstackProfiles = (() => {
 	});
 	api.permissions.onRemoved.addListener(async () => {
 		if (await granted()) return;
+		enabled = false;
 		disconnect();
+		publishLabel();
 	});
 
 	api.storage.onChanged.addListener((changes) => {
+		if (changes.profileMark) {
+			local.mark = changes.profileMark.newValue ?? null;
+			publishLabel();
+		}
 		if (!(changes.profileName || changes.profileClaims || changes.profileWhere || changes.setupDone)) return;
-		if (changes.profileName) local.name = changes.profileName.newValue ?? "";
+		if (changes.profileName) {
+			local.name = changes.profileName.newValue ?? "";
+			publishLabel();
+		}
 		if (changes.profileClaims) local.claims = changes.profileClaims.newValue ?? [];
 		if (changes.profileWhere) local.where = changes.profileWhere.newValue ?? "";
 		if (changes.setupDone) local.done = changes.setupDone.newValue ?? "";
