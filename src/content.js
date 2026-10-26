@@ -4,7 +4,7 @@
 // smaller relay.js, which forwards their key events here.
 
 (() => {
-	const { api, isMac, isFirefox, DEFAULTS, loadSettings, onSettingsChange, matches } = TabstackShared;
+	const { api, isMac, isFirefox, DEFAULTS, loadSettings, onSettingsChange, watchLabel, matches } = TabstackShared;
 	const MODIFIERS = { Meta: "metaKey", Control: "ctrlKey", Alt: "altKey", Shift: "shiftKey" };
 	const SHOW_DELAY = 120; // a quick tap switches without flashing the UI
 
@@ -48,6 +48,11 @@
 	let settings = DEFAULTS;
 	loadSettings().then((s) => (settings = s));
 	onSettingsChange((s) => (settings = s));
+	let label = null; // this profile's name, over search
+	watchLabel((l) => {
+		label = l;
+		switcher?.setProfile(l);
+	});
 
 	// --- modifier tracking ---
 
@@ -144,6 +149,7 @@
 				onCloseTab: (tab) => send({ type: "closeTab", tabId: tab.id, profile: tab.profile }),
 				onClose: hide,
 			});
+			switcher.setProfile(label);
 		}
 		switcher.autoSwitch = settings.autoSwitch;
 		if (!hostEl.isConnected) (document.body ?? document.documentElement).append(hostEl);

@@ -6,7 +6,7 @@
 // is held doesn't reliably hear it come up (see cycleWithoutOverlay in
 // background.js), and searching doesn't need it to.
 
-const { api, loadSettings } = TabstackShared;
+const { api, loadSettings, watchLabel } = TabstackShared;
 
 // A popup sizes itself to the page, so the page sets the width, the same
 // as the search panel's on web pages.
@@ -38,9 +38,11 @@ const switcher = new TabstackUI.Switcher(shadow, {
 	},
 });
 
+watchLabel((label) => switcher.setProfile(label));
+
 // The rows' height is tied to the viewport, which a popup doesn't have until
 // it has sized itself.
-if (inPopup) shadow.append(Object.assign(document.createElement("style"), { textContent: ".rows { max-height: 380px; }" }));
+if (inPopup) shadow.append(Object.assign(document.createElement("style"), { textContent: ".rows, .panel.named .rows { max-height: 380px; }" }));
 
 port.onMessage.addListener(async (msg) => {
 	if (msg.type === "start") {

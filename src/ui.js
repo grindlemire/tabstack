@@ -91,6 +91,31 @@ globalThis.TabstackUI = (() => {
 .thumb .favicon { width: 28px; height: 28px; font-size: 14px; border-radius: 6px; }
 .label { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-width: 0; }
 
+/* this profile, over search: its mark, or its initial, and its name, with
+   its color washing down from the top of the panel */
+.who { display: none; align-items: center; gap: 10px; min-width: 0; padding: 2px 2px 12px; }
+.panel.searching.named .who { display: flex; }
+.panel.named .rows { max-height: min(380px, calc(100vh - 186px)); }
+.panel.searching.tinted { background-image: linear-gradient(color-mix(in srgb, var(--mark) 20%, transparent), transparent 110px); }
+.panel.tinted .search { border-color: color-mix(in srgb, var(--mark) 40%, var(--line)); }
+.who .mark {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	font-size: 15px;
+	font-weight: 700;
+	line-height: 1;
+	border-radius: 8px;
+}
+.who .mark svg { width: 18px; height: 18px; }
+.who .mark.solid { color: var(--ink); background: var(--mark); box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.16); }
+.who .mark.clear { font-size: 22px; color: var(--mark); }
+.who .mark.clear svg { width: 26px; height: 26px; }
+.who .mark.plain { color: var(--muted); background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+.who .name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+
 .search {
 	box-sizing: border-box;
 	width: 100%;
@@ -391,6 +416,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 
 			this.panel = el("div", popover ? "panel" : "panel docked");
 			if (popover) this.panel.popover = "manual";
+			this.who = el("div", "who");
 			this.input = el("input", "search");
 			this.input.placeholder = "Search tabs";
 			this.input.spellcheck = false;
@@ -400,8 +426,33 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.ring = el("div", "ring");
 			this.rows = el("div", "rows");
 			this.debug = el("div", "debug");
-			this.panel.append(this.input, this.cards, this.rows, this.debug);
+			this.panel.append(this.who, this.input, this.cards, this.rows, this.debug);
 			root.append(this.panel);
+		}
+
+		// This profile's name over search, by its mark, or its initial when
+		// it has none. Nothing shows until profiles are set up. A mark's color
+		// tints the panel, and marks the selection when it's neither too pale
+		// for white text nor too dark to see on a dark panel.
+		setProfile(label) {
+			const name = label?.name;
+			const color = name && label.mark?.color;
+			this.panel.classList.toggle("named", !!name);
+			this.panel.classList.toggle("tinted", !!color);
+			this.panel.style.removeProperty("--accent");
+			if (color) {
+				this.panel.style.setProperty("--mark", color);
+				const light = TabstackShared.lightness(color);
+				if (light > 0.08 && light < 0.6) this.panel.style.setProperty("--accent", color);
+			}
+			if (!name) {
+				this.who.replaceChildren();
+				return;
+			}
+			const mark = label.mark
+				? TabstackShared.markElement(label.mark, label.mark.path)
+				: el("span", "mark plain", [...name][0].toUpperCase());
+			this.who.replaceChildren(mark, el("span", "name", name));
 		}
 
 		open(mode, tabs, closed = []) {
