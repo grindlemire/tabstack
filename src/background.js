@@ -5,7 +5,7 @@
 
 // Chrome runs this as a service worker; Firefox lists shared.js before it.
 // Working across profiles (profiles.js) is Chrome only for now.
-if (typeof importScripts === "function") importScripts("shared.js", "profiles.js");
+if (typeof importScripts === "function") importScripts("shared.js", "icons.js", "profiles.js");
 
 const { api, isMac, loadSettings, onSettingsChange } = TabstackShared;
 const profiles = globalThis.TabstackProfiles ?? null; // only with the profile helper
@@ -627,16 +627,71 @@ async function switchShortcut() {
 
 // Chrome silently skips a suggested shortcut that's already taken. Turn the
 // toolbar icon red until one is set, rather than doing nothing on Cmd+J.
+// Otherwise a profile with a mark (profiles.js) shows it there, so you can
+// tell which profile a window belongs to.
 let lastShortcutCheck = 0;
+let label = null; // this profile's { name, mark }
 async function checkShortcut() {
 	lastShortcutCheck = Date.now();
 	const { shortcut } = await switchShortcut();
 	const action = api.action ?? api.browserAction; // Firefox's build is Manifest V2
-	action.setIcon({ path: shortcut ? ICONS : WARNING_ICONS });
-	action.setTitle({ title: shortcut ? "tabstack" : "tabstack: no shortcut set. Click to choose one." });
+	if (!shortcut) {
+		action.setIcon({ path: WARNING_ICONS });
+		action.setTitle({ title: "tabstack: no shortcut set. Click to choose one." });
+		return;
+	}
+	const mark = label?.mark;
+	action.setIcon(mark ? { imageData: { 16: drawMark(mark, 16), 32: drawMark(mark, 32) } } : { path: ICONS });
+	action.setTitle({ title: label?.name ? `tabstack: ${label.name}` : "tabstack" });
 }
 
-checkShortcut();
+// The mark's icon or letter: on a rounded square of its color when it's
+// solid, or in its color, as large as the icon can be, when it's clear.
+function drawMark({ icon, glyph, color, style }, size) {
+	const ctx = new OffscreenCanvas(size, size).getContext("2d");
+	const solid = style !== "clear";
+	if (solid) {
+		const inset = size / 16;
+		ctx.fillStyle = color;
+		ctx.beginPath();
+		ctx.roundRect(inset, inset, size - inset * 2, size - inset * 2, size * 0.25);
+		ctx.fill();
+	}
+	ctx.fillStyle = solid ? TabstackShared.inkOn(color) : color;
+
+	const path = icon && globalThis.TabstackIcons?.[icon];
+	if (path) {
+		// the icons leave a tenth of their grid blank on each side
+		const box = size * (solid ? 0.78 : 1.1);
+		ctx.translate((size - box) / 2, (size - box) / 2);
+		ctx.scale(box / 256, box / 256);
+		ctx.fill(new Path2D(path));
+		return ctx.getImageData(0, 0, size, size);
+	}
+	// an icon picked from an earlier list, since renamed: just the color
+	if (!glyph) return ctx.getImageData(0, 0, size, size);
+
+	// scaled by the letter's own outline, so a wide one and a tall one sit
+	// centered and fill the space about as much
+	const fit = size * (solid ? 0.56 : 0.84);
+	const font = (px) => `700 ${px}px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
+	ctx.font = font(size);
+	let m = ctx.measureText(glyph);
+	const scale = fit / Math.max(m.actualBoundingBoxLeft + m.actualBoundingBoxRight, m.actualBoundingBoxAscent + m.actualBoundingBoxDescent, 1);
+	ctx.font = font(size * scale);
+	m = ctx.measureText(glyph);
+	ctx.fillText(
+		glyph,
+		(size - m.actualBoundingBoxRight + m.actualBoundingBoxLeft) / 2,
+		(size + m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2,
+	);
+	return ctx.getImageData(0, 0, size, size);
+}
+
+TabstackShared.watchLabel((l) => {
+	label = l;
+	checkShortcut();
+});
 api.commands.onChanged?.addListener(checkShortcut);
 
 // --- messages from content scripts and the settings page ---
