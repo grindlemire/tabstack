@@ -3,7 +3,7 @@
 // keeping their windows stacked.
 //
 // Each profile runs its own copy of tabstack, and extensions can't reach
-// across profiles, so every copy connects to a native helper (tabstack-host/) that
+// across profiles, so every copy connects to a native helper (cmd/tabstack/) that
 // passes messages between them. Few people install it, so none of this shows
 // until they do: the permission it needs is optional, asked for from the
 // setup page (setup.html), and without it this file does nothing at all.
@@ -32,7 +32,7 @@ globalThis.TabstackProfiles = (() => {
 	let profile = null; // this profile's ID; profiles are listed in the order of their IDs
 	let peers = []; // every connected profile, this one included: { profile, windows, info }
 	// this profile's name, its mark ({ glyph, color }), the links that belong
-	// to it, and, from tabstack-host install, where it is and which install
+	// to it, and, from tabstack install, where it is and which install
 	// run's setup page was finished
 	let local = { name: "", mark: null, claims: [], where: "", done: "" };
 	let shared = { values: SHARED_DEFAULTS, at: 0 };
@@ -172,7 +172,7 @@ globalThis.TabstackProfiles = (() => {
 			type: "state",
 			profile,
 			windows: windows.length,
-			// where tells tabstack-host install which of the browser's profiles this is
+			// where tells tabstack install which of the browser's profiles this is
 			info: { name: local.name, mark: local.mark, claims: local.claims, where: local.where, done: local.done, shared },
 		});
 	}
@@ -275,7 +275,7 @@ globalThis.TabstackProfiles = (() => {
 		}
 	}
 
-	// tabstack-host's commands (tabstack-host/manage.go and tabs.go). Some it
+	// the tabstack command's (cmd/tabstack/manage.go and tabs.go). Some it
 	// sees take effect in the list of profiles; the rest are answered.
 	async function fromCommandLine(from, body) {
 		switch (body.kind) {

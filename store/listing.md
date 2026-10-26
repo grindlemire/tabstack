@@ -105,7 +105,7 @@ The switcher is drawn over the page the user is on, which needs a content script
 
 **nativeMessaging** (optional)
 ```
-Connects to tabstack-host, an optional open-source helper app the user installs to use tabstack across their Chrome profiles. Chrome keeps each profile's extensions apart, so the helper passes messages between tabstack in each profile, on the user's computer only. tabstack asks for this permission only when the user sets up the helper, and removes it when they turn the feature off.
+Connects to an optional open-source helper app, the tabstack command, which the user installs to use tabstack across their Chrome profiles. Chrome keeps each profile's extensions apart, so the helper passes messages between tabstack in each profile, on the user's computer only. tabstack asks for this permission only when the user sets up the helper, and removes it when they turn the feature off.
 ```
 
 **contextMenus** (optional)
@@ -138,7 +138,7 @@ lending decisions.
 ```
 Open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the previous tab. Hold Cmd and press J repeatedly to cycle through recent tabs, and press Cmd+Shift+Space to search. No account or login is needed.
 
-Working across Chrome profiles is optional and needs a separate helper app, tabstack-host (source: https://github.com/grindlemire/tabstack/tree/main/tabstack-host). Everything above works without it, and its permissions are only requested when the user sets it up.
+Working across Chrome profiles is optional and needs a separate helper app, the tabstack command (source: https://github.com/grindlemire/tabstack/tree/main/cmd/tabstack). Everything above works without it, and its permissions are only requested when the user sets it up.
 ```
 
 ## addons.mozilla.org

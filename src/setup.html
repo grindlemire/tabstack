@@ -286,14 +286,14 @@
 						<h2>Install the helper</h2>
 						<p>With Go, on macOS or Linux:</p>
 						<div class="command">
-							<code id="build-cmd">go install github.com/grindlemire/tabstack/tabstack-host@latest</code>
+							<code id="build-cmd">go install github.com/grindlemire/tabstack/cmd/tabstack@latest</code>
 							<button data-copy="build-cmd">Copy</button>
 						</div>
 					</li>
 					<li class="card step">
 						<h2>Run its setup</h2>
 						<div class="command">
-							<code id="install-cmd">~/go/bin/tabstack-host install</code>
+							<code id="install-cmd">~/go/bin/tabstack install</code>
 							<button data-copy="install-cmd">Copy</button>
 						</div>
 						<p>
@@ -307,7 +307,7 @@
 				</p>
 			</section>
 
-			<!-- opened by tabstack-host install, in one profile -->
+			<!-- opened by tabstack install, in one profile -->
 			<section id="from-cli" hidden>
 				<p class="lede" id="cli-lede"></p>
 				<div class="card">
@@ -329,7 +329,7 @@
 					<h2>From the terminal</h2>
 					<p>Every profile, numbered, and how it's connected:</p>
 					<div class="command">
-						<code id="list-cmd">tabstack-host list</code>
+						<code id="list-cmd">tabstack list</code>
 						<button data-copy="list-cmd">Copy</button>
 					</div>
 					<p>
@@ -356,7 +356,7 @@
 					<span id="keys"></span>
 					<button id="shortcuts">Change</button>
 				</div>
-				<!-- for tabstack-host install, which waits for it before moving on -->
+				<!-- for tabstack install, which waits for it before moving on -->
 				<div class="done" id="done-row" hidden>
 					<button class="primary" id="done">Done</button>
 					<span class="status" id="done-status"></span>

@@ -307,7 +307,7 @@ function showStatus(status) {
 	if (!status.connected && /not found/.test(status.error)) {
 		// uninstalled, or never registered with this browser
 		text = "The profile helper isn't installed";
-		detail = "Run tabstack-host install, then Reconnect.";
+		detail = "Run tabstack install, then Reconnect.";
 	} else if (!status.connected) {
 		text = "Can't reach the profile helper";
 		detail = status.error;
@@ -342,7 +342,7 @@ setInterval(async () => {
 	if (isFirefox || reconnecting) return;
 	const status = await api.runtime.sendMessage({ type: "profiles" }).catch(() => null);
 	if (!status || !("granted" in status)) return;
-	// turned on or off from elsewhere (setup page, tabstack-host): redraw it all
+	// turned on or off from elsewhere (setup page, the tabstack command): redraw it all
 	if (status.granted !== granted) refreshProfiles();
 	else if (status.granted) showStatus(status);
 }, STATUS_POLL);
@@ -356,7 +356,7 @@ async function refreshProfiles() {
 		api.storage.local.get("profileId"),
 	]);
 	$("profiles-ad").hidden = status.granted || !!profilesAdHidden;
-	// set up once and turned off since (here, or by tabstack-host uninstall)
+	// set up once and turned off since (here, or by tabstack uninstall)
 	if (profileId) {
 		$("profiles-ad-title").textContent = "Profile features are off";
 		$("profiles-ad-text").textContent = "Turn them back on to switch, search and open links across your profiles.";

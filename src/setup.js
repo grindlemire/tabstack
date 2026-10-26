@@ -1,6 +1,6 @@
-// Connecting tabstack to the profile helper (profiles.js, tabstack-host/).
+// Connecting tabstack to the profile helper (profiles.js, cmd/tabstack/).
 //
-// tabstack-host install opens this page in each profile it finds tabstack in,
+// tabstack install opens this page in each profile it finds tabstack in,
 // saying which profile it is (where) and what the browser calls it (name):
 // then it's one Allow button, since Chrome only grants the permission on a
 // click. Opened from tabstack's popup instead, it explains how to get there.
@@ -25,7 +25,7 @@ if (fromCli) {
 	const name = params.get("name") || "this profile";
 	$("title").textContent = `Connect ${name}`;
 	$("cli-lede").textContent =
-		"tabstack-host found tabstack in this profile. Click Allow, then accept Chrome's prompt " +
+		"tabstack install found tabstack in this profile. Click Allow, then accept Chrome's prompt " +
 		'to let tabstack "communicate with cooperating native applications": that\'s the helper. Chrome asks once in each profile.';
 	// saved now, so they survive the restart that connecting can need
 	api.storage.local.set({ profileWhere: where, setupUrl: location.href });
@@ -94,7 +94,7 @@ function showPage(status) {
 		setStatus($("manage-status"), "ok", `Connected. Profiles: ${names.join(", ")}`);
 	} else {
 		const why = status.error ? ` (${status.error})` : "";
-		setStatus($("manage-status"), "error", `This profile can't reach the helper${why}. Check that tabstack-host is installed, then reconnect.`);
+		setStatus($("manage-status"), "error", `This profile can't reach the helper${why}. Check that the tabstack command is installed, then reconnect.`);
 	}
 }
 
@@ -115,7 +115,7 @@ function show(status) {
 	}
 	if (!status.connected) {
 		const why = status.error ? ` (${status.error})` : "";
-		setStatus(el, "error", `tabstack can't reach the helper${why}. Run tabstack-host install, then try again.`);
+		setStatus(el, "error", `tabstack can't reach the helper${why}. Run tabstack install, then try again.`);
 		$("allow").hidden = false;
 		$("allow").textContent = "Try again";
 		return;
@@ -222,7 +222,7 @@ $("name").addEventListener("keydown", (e) => {
 });
 $("links").addEventListener("change", saveLinks);
 
-// Saves what's on the page and tells tabstack-host install this profile is
+// Saves what's on the page and tells tabstack install this profile is
 // set up, so it moves on to the next one.
 async function finish() {
 	if ($("done").disabled) return;
@@ -244,7 +244,7 @@ async function finish() {
 		$("done-status"),
 		took ? "ok" : "error",
 		took
-			? "Saved. tabstack-host moves on to your next profile, if there is one."
+			? "Saved. tabstack install moves on to your next profile, if there is one."
 			: "Saved, but tabstack's background didn't pass it on. Reload tabstack on chrome://extensions, then click Done again.",
 	);
 	if (!took) return;
