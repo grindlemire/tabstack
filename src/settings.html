@@ -17,6 +17,7 @@
 				--track: rgba(0, 0, 0, 0.2);
 				--accent: #3b6cf6;
 				--accent-soft: rgba(59, 108, 246, 0.12);
+				--hover: rgba(0, 0, 0, 0.035);
 				--error: #d93025;
 				color-scheme: light dark;
 			}
@@ -33,6 +34,7 @@
 					--track: rgba(255, 255, 255, 0.16);
 					--accent: #5b85ff;
 					--accent-soft: rgba(91, 133, 255, 0.16);
+					--hover: rgba(255, 255, 255, 0.04);
 					--error: #ff6b5b;
 				}
 			}
@@ -189,6 +191,114 @@
 			#profile-keys { gap: 8px; }
 			#profiles-off { margin: 0 0 0 -6px; font-size: 11.5px; color: var(--muted); }
 
+			/* a row that opens a page of its own */
+			button.row.nav {
+				width: 100%;
+				margin: 0;
+				font: inherit;
+				text-align: left;
+				color: var(--fg);
+				border-radius: 0;
+			}
+			button.row.nav:hover { background: var(--hover); }
+			button.row.nav:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+			.chevron { flex: none; width: 14px; height: 14px; margin-right: -2px; }
+			.chevron path, .back path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+			.chevron path { stroke: var(--muted); }
+			#mark-preview { display: flex; align-items: center; font-size: 12.5px; color: var(--muted); }
+
+			/* the profile's mark, an icon or letter in a color, as the toolbar shows it */
+			.mark { display: grid; place-items: center; font-weight: 700; line-height: 1; }
+			.mark.solid {
+				color: var(--ink);
+				background: var(--mark);
+				box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.12);
+			}
+			.mark.clear { color: var(--mark); }
+			#mark-preview .mark { width: 22px; height: 22px; font-size: 12.5px; border-radius: 6px; }
+			#mark-preview .mark svg { width: 15px; height: 15px; }
+			#mark-preview .mark.clear { font-size: 18px; }
+			#mark-preview .mark.clear svg { width: 22px; height: 22px; }
+
+			/* the picker's page */
+			body.picking > :not(#mark-view) { display: none !important; }
+			#mark-view { animation: enter 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+			@keyframes enter { from { opacity: 0; transform: translateX(10px); } }
+			.view-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 0 12px; }
+			.view-head h1 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
+			.view-head .back { display: inline-flex; align-items: center; gap: 1px; justify-self: start; margin: 0 0 0 -4px; padding: 3px 6px 3px 2px; }
+			.view-head .back svg { width: 16px; height: 16px; }
+			#mark-remove { justify-self: end; color: var(--muted); }
+			#mark-remove:hover { color: var(--error); }
+
+			.mark-card { display: flex; flex-direction: column; gap: 12px; padding: 14px 12px; }
+			.hero { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+			.hero .label strong { display: block; font-size: 14px; font-weight: 600; }
+			.hero .label small { font-size: 12px; }
+			#mark-big { flex: none; display: grid; place-items: center; width: 48px; height: 48px; }
+			#mark-big .mark { width: 48px; height: 48px; font-size: 26px; border-radius: 12px; }
+			#mark-big .mark svg { width: 30px; height: 30px; }
+			#mark-big .mark.clear { font-size: 38px; }
+			#mark-big .mark.clear svg { width: 46px; height: 46px; }
+			#mark-big img { width: 40px; height: 40px; }
+
+			.segmented { display: flex; padding: 2px; background: var(--bg); border-radius: 8px; box-shadow: inset 0 0 0 0.5px var(--line); }
+			.segmented button { flex: 1; margin: 0; padding: 5px 0; font-size: 12.5px; color: var(--muted); border-radius: 6px; }
+			.segmented button:hover { color: var(--fg); background: none; }
+			.segmented button[aria-checked="true"] { color: var(--fg); background: var(--group); box-shadow: 0 0 0 0.5px var(--line), 0 1px 2px rgba(0, 0, 0, 0.1); }
+
+			.swatches { display: grid; grid-template-columns: repeat(8, 1fr); justify-items: center; row-gap: 10px; }
+			.swatches button {
+				width: 22px;
+				height: 22px;
+				margin: 0;
+				padding: 0;
+				background: var(--swatch);
+				border-radius: 50%;
+				/* an edge, so white shows on a light popup and black on a dark one */
+				box-shadow: inset 0 0 0 1px var(--line);
+				transition: box-shadow 0.12s ease, transform 0.12s ease;
+			}
+			.swatches button:hover { background: var(--swatch); transform: scale(1.12); }
+			.swatches button[aria-pressed="true"] {
+				box-shadow: inset 0 0 0 1px var(--line), 0 0 0 2px var(--group), 0 0 0 3.5px var(--swatch), 0 0 0 4px var(--line);
+			}
+
+			#mark-search {
+				display: block;
+				width: 100%;
+				margin: 12px 0 8px;
+				padding: 7px 10px;
+				font: inherit;
+				color: var(--fg);
+				background: var(--group);
+				border: 1px solid var(--line);
+				border-radius: 8px;
+				outline: none;
+			}
+			#mark-search:focus { border-color: var(--accent); }
+			.glyphs { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
+			.glyphs button {
+				display: grid;
+				place-items: center;
+				aspect-ratio: 1;
+				margin: 0;
+				padding: 0;
+				font-size: 15px;
+				font-weight: 700;
+				color: var(--fg);
+				background: var(--group);
+				border-radius: 8px;
+				box-shadow: 0 0 0 0.5px var(--line);
+				transition: background 0.12s ease, color 0.12s ease;
+			}
+			.glyphs svg { width: 18px; height: 18px; }
+			.glyphs button:hover { background: var(--accent-soft); }
+			.glyphs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+			.glyphs.solid button[aria-pressed="true"] { color: var(--ink); background: var(--mark); }
+			.glyphs.clear button[aria-pressed="true"] { color: var(--mark); box-shadow: inset 0 0 0 1.5px var(--mark); }
+			#mark-empty { margin: 4px 2px 0; }
+
 			/* setting up the profile helper, offered once and easy to dismiss */
 			.ad {
 				display: flex;
@@ -210,7 +320,7 @@
 			section:nth-of-type(3), .ad { animation-delay: 0.12s; }
 			@keyframes rise { from { opacity: 0; transform: translateY(4px); } }
 			@media (prefers-reduced-motion: reduce) {
-				header, section, .ad, .keys.recording { animation: none; }
+				header, section, .ad, .keys.recording, #mark-view { animation: none; }
 				input[type="checkbox"], input[type="checkbox"]::before { transition: none; }
 			}
 		</style>
@@ -278,6 +388,11 @@
 					<span class="label">This profile's name</span>
 					<input type="text" id="profile-name" maxlength="40" spellcheck="false" />
 				</div>
+				<button class="row nav" id="mark-open">
+					<span class="label">Profile icon<small>Shown in place of tabstack's toolbar icon</small></span>
+					<span id="mark-preview"></span>
+					<svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+				</button>
 				<div class="row">
 					<span class="label">Switch profiles</span>
 					<span class="keys" id="profile-keys"></span>
@@ -317,7 +432,35 @@
 			<button id="profiles-ad-hide" aria-label="Hide" title="Don't show this again">✕</button>
 		</div>
 
+		<!-- the profile icon picker, a page of its own over the settings -->
+		<div id="mark-view" hidden>
+			<div class="view-head">
+				<button id="mark-back" class="back">
+					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>Settings
+				</button>
+				<h1>Profile icon</h1>
+				<button id="mark-remove">Remove</button>
+			</div>
+
+			<div class="group mark-card">
+				<div class="hero">
+					<span id="mark-big"></span>
+					<span class="label"><strong id="mark-title"></strong><small id="mark-subtitle"></small></span>
+				</div>
+				<div class="segmented" role="radiogroup" aria-label="Style">
+					<button role="radio" data-style="solid">Solid</button>
+					<button role="radio" data-style="clear">Transparent</button>
+				</div>
+				<div class="swatches" id="mark-colors" role="group" aria-label="Color"></div>
+			</div>
+
+			<input type="search" id="mark-search" placeholder="Search icons, or type a letter" spellcheck="false" autocomplete="off" />
+			<div class="glyphs" id="mark-glyphs" role="group" aria-label="Icon"></div>
+			<p class="note" id="mark-empty" hidden>No icons match. Type a single letter or number to use it instead.</p>
+		</div>
+
 		<script src="shared.js"></script>
+		<script src="icons.js"></script>
 		<script src="settings.js"></script>
 	</body>
 </html>
