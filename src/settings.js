@@ -7,9 +7,62 @@ const $ = (id) => document.getElementById(id);
 // its shortcuts page.
 const canRebindCommands = typeof api.commands.update === "function";
 
+// --- motion: what comes and goes in the popup (the animations are in settings.html) ---
+
+const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Plays an entrance on an element from the start, even one it played before.
+// It's taken off once it ends, so showing the element again doesn't replay it.
+function play(el, name) {
+	el.classList.remove("from-right", "from-left", "appear", name);
+	void el.offsetWidth; // restarts the animation
+	el.classList.add(name);
+	el.addEventListener("animationend", () => el.classList.remove(name), { once: true });
+}
+
+// Once the popup's been moved around in, its opening rise is done, so it
+// doesn't replay with every tab.
+const settle = () => document.body.classList.add("settled");
+
+const fading = new Map(); // element fading out -> the timer that hides it
+
+function reveal(el) {
+	if (fading.has(el)) {
+		// called back mid-fade: it comes back in from where it is
+		clearTimeout(fading.get(el));
+		fading.delete(el);
+		el.classList.remove("leaving");
+		el.hidden = true;
+	}
+	if (!el.hidden) return;
+	el.hidden = false;
+	play(el, "appear");
+}
+
+// Fades out, then hides, as the fade (.leaving, 0.16s) ends.
+function conceal(el) {
+	if (el.hidden || fading.has(el)) return;
+	if (calm()) {
+		el.hidden = true;
+		return;
+	}
+	el.classList.remove("appear");
+	el.classList.add("leaving");
+	fading.set(
+		el,
+		setTimeout(() => {
+			fading.delete(el);
+			el.hidden = true;
+			el.classList.remove("leaving");
+		}, 160),
+	);
+}
+
 function note(text, error = false) {
+	const was = $("note").textContent;
 	$("note").textContent = text;
 	$("note").classList.toggle("error", error);
+	if (text && text !== was) play($("note"), "appear");
 }
 
 // Chrome reports "⌘J" on macOS already; Firefox reports "Command+J".
@@ -48,15 +101,27 @@ function firefoxShortcut(s) {
 }
 
 // Each key of a shortcut gets its own keycap: "⇧⌘K" is ⇧ ⌘ K, and
-// "Ctrl+Shift+K" is Ctrl Shift K.
+// "Ctrl+Shift+K" is Ctrl Shift K. A shortcut that just changed pops in a
+// key at a time.
 function showKeys(el, shortcut) {
+	const changed = el.dataset.shown !== undefined && el.dataset.shown !== shortcut;
+	el.dataset.shown = shortcut;
 	el.classList.toggle("missing", !shortcut);
 	if (!shortcut) {
 		el.textContent = "Not set";
 		return;
 	}
 	const keys = shortcut.includes("+") ? shortcut.split("+") : shortcut.match(/[⌃⌥⇧⌘]|[^⌃⌥⇧⌘]+/g);
-	el.replaceChildren(...keys.map((key) => Object.assign(document.createElement("kbd"), { textContent: key })));
+	el.replaceChildren(
+		...keys.map((key, i) => {
+			const kbd = Object.assign(document.createElement("kbd"), { textContent: key });
+			if (changed) {
+				kbd.classList.add("pop");
+				kbd.style.animationDelay = `${i * 45}ms`;
+			}
+			return kbd;
+		}),
+	);
 }
 
 // --- recording a shortcut ---
@@ -90,6 +155,7 @@ addEventListener("keydown", async (e) => {
 	if (!shortcut) return; // a lone modifier; wait for the key
 	if (!shortcut.meta && !shortcut.ctrl && !shortcut.alt) {
 		note(`Include ${isMac ? "⌘, ⌃ or ⌥" : "Ctrl or Alt"} so it doesn't fire while you type.`, true);
+		if (!calm()) play(recording.kbd, "shake");
 		return;
 	}
 	const { save } = recording;
@@ -168,6 +234,100 @@ const openSetup = () => {
 	window.close();
 };
 
+// With profile features on, they get a tab of their own beside the rest of
+// the settings. The popup opens on whichever tab was used last.
+let tabPicked = false;
+
+function lastTab() {
+	try {
+		return localStorage.getItem("tab") === "profiles" ? "profiles" : "general";
+	} catch {
+		return "general";
+	}
+}
+
+// Both tabs stay laid out, the one not chosen invisible, so the popup keeps
+// the taller one's size instead of jumping as they switch.
+function selectTab(name) {
+	for (const tab of document.querySelectorAll("[data-tab]")) tab.setAttribute("aria-selected", tab.dataset.tab === name);
+	for (const panel of [$("general"), $("profiles")]) {
+		panel.classList.toggle("inactive", panel.id !== name);
+		panel.inert = panel.id !== name;
+	}
+}
+
+const shownTab = () => ($("profiles").classList.contains("inactive") || $("profiles").hidden ? $("general") : $("profiles"));
+
+for (const tab of document.querySelectorAll("[data-tab]")) {
+	tab.addEventListener("click", () => {
+		const name = tab.dataset.tab;
+		if (tab.getAttribute("aria-selected") === "true") return;
+		tabPicked = true;
+		selectTab(name);
+		settle();
+		// Profiles sits to the right of General
+		play($(name), name === "profiles" ? "from-right" : "from-left");
+		try {
+			localStorage.setItem("tab", name);
+		} catch {}
+	});
+}
+
+// --- the connection, at the foot of the profile's card ---
+
+const STATUS_POLL = 2000; // ms; other profiles connect, or the helper stops, while the popup's open
+let granted = null; // whether profile features were on when last looked
+let reconnecting = false;
+
+// How this profile's connected, with Reconnect only when it isn't. A change
+// of wording fades in.
+function showStatus(status) {
+	const others = status.peers.filter((p) => !p.self);
+	let text;
+	let detail = "";
+	if (!status.connected && /not found/.test(status.error)) {
+		// uninstalled, or never registered with this browser
+		text = "The profile helper isn't installed";
+		detail = "Run tabstack-host install, then Reconnect.";
+	} else if (!status.connected) {
+		text = "Can't reach the profile helper";
+		detail = status.error;
+	} else if (!others.length) {
+		text = "Only this profile so far";
+		detail = "Set up tabstack in your other profiles too.";
+	} else {
+		const one = others.length === 1;
+		text = `Connected to ${one ? others[0].name : `${others.length} profiles`}`;
+		detail = one ? "" : others.map((p) => p.name).join(" · ");
+	}
+	$("profiles-dot").classList.toggle("ok", status.connected);
+	$("profiles-retry").hidden = status.connected;
+	if ($("profiles-status").textContent !== text && $("profiles-status").textContent) play($("profiles-status"), "appear");
+	$("profiles-status").textContent = text;
+	$("profiles-detail").textContent = detail;
+}
+
+$("profiles-retry").addEventListener("click", async () => {
+	reconnecting = true;
+	$("profiles-dot").classList.add("busy");
+	$("profiles-retry").disabled = true;
+	$("profiles-status").textContent = "Reconnecting…";
+	const status = await api.runtime.sendMessage({ type: "profilesConnect" }).catch(() => null);
+	reconnecting = false;
+	$("profiles-dot").classList.remove("busy");
+	$("profiles-retry").disabled = false;
+	if (status && "granted" in status) showStatus(status);
+});
+
+setInterval(async () => {
+	if (isFirefox || reconnecting) return;
+	const status = await api.runtime.sendMessage({ type: "profiles" }).catch(() => null);
+	if (!status || !("granted" in status)) return;
+	// turned on or off from elsewhere (setup page, tabstack-host): redraw it all
+	if (status.granted !== granted) refreshProfiles();
+	else if (status.granted) showStatus(status);
+}, STATUS_POLL);
+
 async function refreshProfiles() {
 	if (isFirefox) return;
 	const status = await api.runtime.sendMessage({ type: "profiles" }).catch(() => null);
@@ -183,31 +343,21 @@ async function refreshProfiles() {
 		$("profiles-ad-text").textContent = "Turn them back on to switch, search and open links across your profiles.";
 		$("profiles-learn").textContent = "Turn back on";
 	}
-	$("profiles").hidden = !status.granted;
-	if (!status.granted) return;
-
-	const others = status.peers.filter((p) => !p.self);
-	if (!status.connected && /not found/.test(status.error)) {
-		// uninstalled, or never registered with this browser
-		$("profiles-status").textContent = "The profile helper isn't installed";
-		$("profiles-detail").textContent = "Run tabstack-host install, or turn off profile features below.";
-	} else if (!status.connected) {
-		$("profiles-status").textContent = "Can't reach the profile helper";
-		$("profiles-detail").textContent = status.error;
-	} else if (!others.length) {
-		$("profiles-status").textContent = "Only this profile so far";
-		$("profiles-detail").textContent = "Set up tabstack in your other profiles too.";
-	} else {
-		const one = others.length === 1;
-		$("profiles-status").textContent = `Connected to ${one ? others[0].name : `${others.length} profiles`}`;
-		$("profiles-detail").textContent = one ? "" : others.map((p) => p.name).join(" · ");
+	granted = status.granted;
+	$("tabs").hidden = $("profiles").hidden = !status.granted;
+	if (!status.granted) {
+		selectTab("general");
+		return;
 	}
+	if (!tabPicked) selectTab(lastTab());
+	showStatus(status);
 
 	if (document.activeElement !== $("profile-name")) $("profile-name").value = status.name;
 	$("profile-name").placeholder = status.placeholder;
 	({ profileMark: mark = null } = await api.storage.sync.get("profileMark"));
 	showMark();
 	if (document.activeElement !== $("profile-claims")) $("profile-claims").value = status.claims.join("\n");
+	showClaims(status.claims);
 	for (const box of document.querySelectorAll("[data-shared]")) box.checked = !!status.shared[box.dataset.shared];
 	$("claims-row").hidden = !status.shared.route;
 
@@ -234,10 +384,9 @@ async function refreshProfiles() {
 }
 
 $("profiles-learn").addEventListener("click", openSetup);
-$("profiles-setup").addEventListener("click", openSetup);
 $("profiles-ad-hide").addEventListener("click", () => {
 	api.storage.sync.set({ profilesAdHidden: true });
-	$("profiles-ad").hidden = true;
+	conceal($("profiles-ad"));
 });
 $("profile-keys-change").addEventListener("click", () => {
 	api.tabs.create({ url: "chrome://extensions/shortcuts" });
@@ -247,13 +396,16 @@ $("profiles-off").addEventListener("click", async () => {
 	await api.permissions.remove(PERMISSIONS);
 	// the offer comes back, to turn them on again from here
 	await api.storage.sync.set({ profilesAdHidden: false });
-	refreshProfiles();
+	await refreshProfiles();
+	// back on General, which sits to the left
+	settle();
+	play($("general"), "from-left");
 });
 
 for (const box of document.querySelectorAll("[data-shared]")) {
 	box.addEventListener("change", () => {
 		api.runtime.sendMessage({ type: "profilesShared", values: { [box.dataset.shared]: box.checked } });
-		if (box.dataset.shared === "route") $("claims-row").hidden = !box.checked;
+		if (box.dataset.shared === "route") (box.checked ? reveal : conceal)($("claims-row"));
 	});
 }
 
@@ -353,9 +505,14 @@ for (const button of document.querySelectorAll("[data-style]")) choice(button, (
 const iconTitle = (icon) => icon[0].toUpperCase() + icon.slice(1).replaceAll("-", " ");
 const colorName = (color) => MARK_COLORS.find(([, c]) => c === color)?.[0] ?? color;
 
-// The top of the picker: what's under the pointer, or what's picked.
+// The top of the picker: what's under the pointer, or what's picked. It's
+// redrawn, and pops, only when that changes.
+let heroShown;
 function showHero() {
 	const shown = previewing ?? mark;
+	const key = JSON.stringify(shown);
+	if (key === heroShown) return;
+	heroShown = key;
 	if (!shown) {
 		$("mark-big").replaceChildren(Object.assign(document.createElement("img"), { src: "icons/icon-48.png", alt: "" }));
 		$("mark-title").textContent = "tabstack's icon";
@@ -368,7 +525,9 @@ function showHero() {
 }
 
 function showMark() {
-	$("mark-preview").replaceChildren(mark ? markElement(mark, TabstackIcons[mark.icon]) : "None");
+	$("mark-preview").replaceChildren(
+		mark ? markElement(mark, TabstackIcons[mark.icon]) : Object.assign(document.createElement("span"), { className: "mark empty", textContent: initial() }),
+	);
 	$("mark-remove").hidden = !mark;
 	showHero();
 
@@ -416,21 +575,41 @@ function filterIcons() {
 	showMark();
 }
 
-function openPicker() {
+// --- pages of their own over the settings: the icon picker, and the links ---
+
+// A page slides in from the right, and going back slides the settings in
+// from the left. A shorter page keeps the popup's size, so it doesn't shrink
+// under the pointer.
+function openView(id, focus) {
+	settle();
+	document.body.style.minHeight = `${document.body.offsetHeight}px`;
 	document.body.classList.add("picking");
-	$("mark-view").hidden = false;
+	$(id).hidden = false;
+	play($(id), "from-right");
+	scrollTo(0, 0);
+	$(focus).focus();
+}
+
+// Back where the page was opened from.
+function closeView(id, opener) {
+	document.body.classList.remove("picking");
+	document.body.style.minHeight = "";
+	$(id).hidden = true;
+	play(document.querySelector("header"), "from-left");
+	play(shownTab(), "from-left");
+	$(opener).focus({ preventScroll: true });
+	$(opener).scrollIntoView({ block: "nearest" });
+}
+
+function openPicker() {
 	$("mark-search").value = "";
 	filterIcons();
-	scrollTo(0, 0);
-	$("mark-search").focus();
+	openView("mark-view", "mark-search");
 }
 
 function closePicker() {
 	previewing = null;
-	document.body.classList.remove("picking");
-	$("mark-view").hidden = true;
-	$("mark-open").focus({ preventScroll: true });
-	$("mark-open").scrollIntoView({ block: "nearest" });
+	closeView("mark-view", "mark-open");
 }
 
 $("mark-open").addEventListener("click", openPicker);
@@ -455,12 +634,38 @@ $("mark-view").addEventListener("keydown", (e) => {
 
 let nameTimer = 0;
 $("profile-name").addEventListener("input", (e) => {
+	if (!mark) showMark(); // with no icon yet, the name's initial stands in
 	clearTimeout(nameTimer);
-	nameTimer = setTimeout(() => api.storage.sync.set({ profileName: e.target.value.trim() }), 300);
+	nameTimer = setTimeout(async () => {
+		await api.storage.sync.set({ profileName: e.target.value.trim() });
+		play($("name-saved"), "flash");
+	}, 300);
 });
+$("profile-name").addEventListener("keydown", (e) => {
+	if (e.key === "Enter") e.target.blur();
+});
+
+// The profile's links, edited on their page; the row that opens it sums them up.
+function showClaims(claims) {
+	$("claims-summary").textContent = !claims.length
+		? "None yet"
+		: claims.length === 1
+			? claims[0]
+			: `${claims[0]} and ${claims.length - 1} more`;
+}
+
+// Leaving the page blurs the box, which saves it.
 $("profile-claims").addEventListener("change", (e) => {
 	const claims = e.target.value.split("\n").map((c) => c.trim()).filter(Boolean);
 	api.storage.sync.set({ profileClaims: claims });
+	showClaims(claims);
+});
+$("claims-edit").addEventListener("click", () => openView("links-view", "profile-claims"));
+$("links-back").addEventListener("click", () => closeView("links-view", "claims-edit"));
+$("links-view").addEventListener("keydown", (e) => {
+	if (e.key !== "Escape") return;
+	e.preventDefault();
+	closeView("links-view", "claims-edit");
 });
 
 refresh();

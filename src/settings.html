@@ -43,9 +43,9 @@
 			/* elements laid out with display: flex would show anyway */
 			[hidden] { display: none !important; }
 			body {
-				width: 340px;
+				width: 400px;
 				margin: 0;
-				padding: 14px 12px 12px;
+				padding: 14px 14px 14px;
 				font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 				color: var(--fg);
 				background: var(--bg);
@@ -60,6 +60,8 @@
 			}
 			header img { width: 22px; height: 22px; }
 			header h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+			/* General and Profiles, once profile features are on */
+			header .tabs { width: 184px; margin-left: auto; }
 
 			h2 {
 				margin: 0 0 6px;
@@ -82,7 +84,7 @@
 				display: flex;
 				align-items: center;
 				gap: 10px;
-				min-height: 44px;
+				min-height: 42px;
 				padding: 8px 12px;
 				position: relative;
 			}
@@ -191,21 +193,7 @@
 			#profile-keys { gap: 8px; }
 			#profiles-off { margin: 0 0 0 -6px; font-size: 11.5px; color: var(--muted); }
 
-			/* a row that opens a page of its own */
-			button.row.nav {
-				width: 100%;
-				margin: 0;
-				font: inherit;
-				text-align: left;
-				color: var(--fg);
-				border-radius: 0;
-			}
-			button.row.nav:hover { background: var(--hover); }
-			button.row.nav:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-			.chevron { flex: none; width: 14px; height: 14px; margin-right: -2px; }
-			.chevron path, .back path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-			.chevron path { stroke: var(--muted); }
-			#mark-preview { display: flex; align-items: center; font-size: 12.5px; color: var(--muted); }
+			.back path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 			/* the profile's mark, an icon or letter in a color, as the toolbar shows it */
 			.mark { display: grid; place-items: center; font-weight: 700; line-height: 1; }
@@ -215,15 +203,82 @@
 				box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.12);
 			}
 			.mark.clear { color: var(--mark); }
-			#mark-preview .mark { width: 22px; height: 22px; font-size: 12.5px; border-radius: 6px; }
-			#mark-preview .mark svg { width: 15px; height: 15px; }
-			#mark-preview .mark.clear { font-size: 18px; }
-			#mark-preview .mark.clear svg { width: 22px; height: 22px; }
+			/* no icon yet: the name's initial, waiting for one */
+			.mark.empty { color: var(--muted); background: var(--bg); border: 1.5px dashed var(--track); }
+
+			/* this profile: its icon, which opens the picker, its name, and its connection */
+			.identity { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; padding: 12px 14px; }
+			#mark-open { flex: none; margin: 0; padding: 0; background: none; border-radius: 13px; }
+			#mark-open:hover { background: none; }
+			#mark-open:hover .mark { transform: scale(1.05); }
+			#mark-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+			#mark-preview .mark { width: 48px; height: 48px; font-size: 24px; border-radius: 12px; transition: transform 0.15s ease; }
+			#mark-preview .mark svg { width: 30px; height: 30px; }
+			#mark-preview .mark.clear { font-size: 36px; }
+			#mark-preview .mark.clear svg { width: 46px; height: 46px; }
+			.identity-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+			/* the name reads as a title, and edits in place */
+			input#profile-name {
+				width: 100%;
+				margin-left: -7px;
+				padding: 3px 6px;
+				font-size: 16px;
+				font-weight: 650;
+				letter-spacing: -0.01em;
+				background: transparent;
+				border: 1px solid transparent;
+				border-radius: 7px;
+			}
+			input#profile-name:hover { background: var(--hover); }
+			input#profile-name:focus { background: var(--bg); border-color: var(--accent); }
+			.status { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--muted); }
+			.status span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+			.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--error); transition: background 0.3s ease; }
+			.dot.ok { background: #30a46c; }
+			/* trying to reach the helper */
+			.dot.busy { background: var(--muted); animation: pulse 0.9s ease-in-out infinite; }
+			#profiles-detail { font-size: 11.5px; color: var(--muted); }
+			#profiles-detail:empty { display: none; }
+			#profiles-retry { align-self: flex-start; flex: none; }
+			/* a moment's "Saved" by the name, once a rename is stored */
+			.name-field { position: relative; display: block; }
+			.name-field input { padding-right: 52px !important; }
+			.saved {
+				position: absolute;
+				top: 50%;
+				right: 6px;
+				font-size: 11px;
+				font-weight: 500;
+				color: #30a46c;
+				opacity: 0;
+				transform: translateY(-50%);
+				pointer-events: none;
+			}
+			.saved.flash { animation: flash 1.6s ease both; }
+			@keyframes flash {
+				0% { opacity: 0; transform: translateY(-30%); }
+				15%, 70% { opacity: 1; transform: translateY(-50%); }
+				100% { opacity: 0; transform: translateY(-50%); }
+			}
+
+			/* a whole row toggles its switch, so it shows it */
+			label.row { transition: background 0.12s ease; }
+			label.row:hover { background: var(--hover); }
+
+			/* both tabs take the room of the taller one, so switching doesn't resize the popup */
+			.panels { display: grid; }
+			.panels > [role="tabpanel"] { grid-area: 1 / 1; min-width: 0; }
+			.panels > .inactive { visibility: hidden; pointer-events: none; }
+
+			/* a shortcut just set pops in a key at a time; one that won't do shakes */
+			.keys kbd.pop { animation: key-pop 0.28s cubic-bezier(0.3, 1.4, 0.5, 1) both; }
+			@keyframes key-pop { from { opacity: 0; transform: translateY(3px) scale(0.8); } }
+			.keys.shake { animation: shake 0.34s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+			@keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
 
 			/* the picker's page */
-			body.picking > :not(#mark-view) { display: none !important; }
-			#mark-view { animation: enter 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-			@keyframes enter { from { opacity: 0; transform: translateX(10px); } }
+			/* a page of its own over the settings: the icon picker, or the profile's links */
+			body.picking > :not(.view) { display: none !important; }
 			.view-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 0 12px; }
 			.view-head h1 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
 			.view-head .back { display: inline-flex; align-items: center; gap: 1px; justify-self: start; margin: 0 0 0 -4px; padding: 3px 6px 3px 2px; }
@@ -231,7 +286,7 @@
 			#mark-remove { justify-self: end; color: var(--muted); }
 			#mark-remove:hover { color: var(--error); }
 
-			.mark-card { display: flex; flex-direction: column; gap: 12px; padding: 14px 12px; }
+			.mark-card { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
 			.hero { display: flex; align-items: center; gap: 12px; min-height: 48px; }
 			.hero .label strong { display: block; font-size: 14px; font-weight: 600; }
 			.hero .label small { font-size: 12px; }
@@ -242,10 +297,25 @@
 			#mark-big .mark.clear svg { width: 46px; height: 46px; }
 			#mark-big img { width: 40px; height: 40px; }
 
-			.segmented { display: flex; padding: 2px; background: var(--bg); border-radius: 8px; box-shadow: inset 0 0 0 0.5px var(--line); }
-			.segmented button { flex: 1; margin: 0; padding: 5px 0; font-size: 12.5px; color: var(--muted); border-radius: 6px; }
+			/* two choices, with a pill that slides to the chosen one */
+			.segmented { position: relative; display: flex; padding: 2px; background: var(--bg); border-radius: 8px; box-shadow: inset 0 0 0 0.5px var(--line); }
+			.segmented::before {
+				content: "";
+				position: absolute;
+				top: 2px;
+				bottom: 2px;
+				left: 2px;
+				width: calc(50% - 2px);
+				background: var(--group);
+				border-radius: 6px;
+				box-shadow: 0 0 0 0.5px var(--line), 0 1px 2px rgba(0, 0, 0, 0.1);
+				transition: transform 0.28s cubic-bezier(0.3, 1.15, 0.4, 1), opacity 0.15s ease;
+			}
+			.segmented:has(button:last-child:is([aria-checked="true"], [aria-selected="true"]))::before { transform: translateX(100%); }
+			.segmented:not(:has(:is([aria-checked="true"], [aria-selected="true"])))::before { opacity: 0; }
+			.segmented button { position: relative; flex: 1; margin: 0; padding: 5px 0; font-size: 12.5px; color: var(--muted); background: none; border-radius: 6px; transition: color 0.2s ease; }
 			.segmented button:hover { color: var(--fg); background: none; }
-			.segmented button[aria-checked="true"] { color: var(--fg); background: var(--group); box-shadow: 0 0 0 0.5px var(--line), 0 1px 2px rgba(0, 0, 0, 0.1); }
+			.segmented button:is([aria-checked="true"], [aria-selected="true"]) { color: var(--fg); }
 
 			.swatches { display: grid; grid-template-columns: repeat(8, 1fr); justify-items: center; row-gap: 10px; }
 			.swatches button {
@@ -267,7 +337,7 @@
 			#mark-search {
 				display: block;
 				width: 100%;
-				margin: 12px 0 8px;
+				margin: 10px 0 8px;
 				padding: 7px 10px;
 				font: inherit;
 				color: var(--fg);
@@ -277,7 +347,8 @@
 				outline: none;
 			}
 			#mark-search:focus { border-color: var(--accent); }
-			.glyphs { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
+			/* nine across at a fixed size, so all eight rows fit in the popup */
+			.glyphs { display: grid; grid-template-columns: repeat(9, 34px); justify-content: space-between; row-gap: 4px; }
 			.glyphs button {
 				display: grid;
 				place-items: center;
@@ -290,7 +361,7 @@
 				background: var(--group);
 				border-radius: 8px;
 				box-shadow: 0 0 0 0.5px var(--line);
-				transition: background 0.12s ease, color 0.12s ease;
+				transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
 			}
 			.glyphs svg { width: 18px; height: 18px; }
 			.glyphs button:hover { background: var(--accent-soft); }
@@ -298,6 +369,14 @@
 			.glyphs.solid button[aria-pressed="true"] { color: var(--ink); background: var(--mark); }
 			.glyphs.clear button[aria-pressed="true"] { color: var(--mark); box-shadow: inset 0 0 0 1.5px var(--mark); }
 			#mark-empty { margin: 4px 2px 0; }
+
+			/* the links page */
+			.lede { margin: 0 2px 10px; font-size: 12.5px; color: var(--muted); }
+			#profile-claims { display: block; padding: 8px 10px; background: var(--group); }
+			.patterns { margin-top: 12px; }
+			.patterns .row { min-height: 0; padding: 7px 12px; gap: 12px; font-size: 12px; }
+			.patterns code { flex: none; width: 118px; font: 11.5px/1.4 ui-monospace, Menlo, monospace; color: var(--fg); }
+			.patterns .label { color: var(--muted); }
 
 			/* setting up the profile helper, offered once and easy to dismiss */
 			.ad {
@@ -313,15 +392,38 @@
 			.ad .label strong { display: block; font-weight: 600; color: var(--fg); }
 			#profiles-ad-hide { color: var(--muted); }
 
-			/* the groups settle in as the popup opens */
-			header, section, .ad { animation: rise 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-			section:nth-of-type(1) { animation-delay: 0.04s; }
-			section:nth-of-type(2) { animation-delay: 0.08s; }
-			section:nth-of-type(3), .ad { animation-delay: 0.12s; }
+			/* the groups settle in as the popup opens, the first time only */
+			body:not(.settled) :is(header, section, .ad, .identity) { animation: rise 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+			body:not(.settled) :is(section:nth-of-type(1), .identity) { animation-delay: 0.04s; }
+			body:not(.settled) section:nth-of-type(2) { animation-delay: 0.08s; }
+			body:not(.settled) :is(section:nth-of-type(3), .ad) { animation-delay: 0.12s; }
 			@keyframes rise { from { opacity: 0; transform: translateY(4px); } }
+
+			/* between tabs and pages, what comes in slides from the side it sits on */
+			.from-right { animation: from-right 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+			.from-left { animation: from-left 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+			@keyframes from-right { from { opacity: 0; transform: translateX(16px); } }
+			@keyframes from-left { from { opacity: 0; transform: translateX(-16px); } }
+
+			/* a row or notice that comes and goes */
+			.appear { animation: appear 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+			/* over the opening rise, which a notice can still be in */
+			.leaving { animation: leave 0.16s ease-in both !important; pointer-events: none; }
+			@keyframes appear { from { opacity: 0; transform: translateY(-4px); } }
+			@keyframes leave { to { opacity: 0; transform: scale(0.98); } }
+
+			/* the picker's preview, each time it changes */
+			#mark-big > * { animation: pop 0.22s cubic-bezier(0.3, 1.3, 0.5, 1) both; }
+			@keyframes pop { from { opacity: 0.5; transform: scale(0.9); } }
+
+			/* a press dips what's pressed */
+			.glyphs button:active, .swatches button:active { transform: scale(0.9); }
+			#mark-open:active .mark { transform: scale(0.96); }
+
 			@media (prefers-reduced-motion: reduce) {
-				header, section, .ad, .keys.recording, #mark-view { animation: none; }
-				input[type="checkbox"], input[type="checkbox"]::before { transition: none; }
+				body :is(header, section, .ad, .identity), .keys.recording, .keys kbd.pop, .keys.shake, .from-right, .from-left, .appear, .leaving, #mark-big > * { animation: none !important; }
+				input[type="checkbox"], input[type="checkbox"]::before, .segmented::before, .segmented button { transition: none; }
+				.glyphs button:active, .swatches button:active, #mark-open:active .mark, #mark-open:hover .mark { transform: none; }
 			}
 		</style>
 	</head>
@@ -329,114 +431,133 @@
 		<header>
 			<img src="icons/icon-48.png" alt="" />
 			<h1>tabstack</h1>
+			<div class="segmented tabs" id="tabs" role="tablist" hidden>
+				<button role="tab" data-tab="general" aria-controls="general">General</button>
+				<button role="tab" data-tab="profiles" aria-controls="profiles">Profiles</button>
+			</div>
 		</header>
 
-		<section>
-			<h2>Shortcuts</h2>
-			<div class="group">
-				<div class="row">
-					<span class="label">Switch tabs</span>
-					<span class="keys" id="switch-key"></span>
-					<button id="switch-change">Change</button>
-				</div>
-				<div class="row">
-					<span class="label">Search tabs</span>
-					<span class="keys" id="find-key"></span>
-					<button id="find-change">Change</button>
-				</div>
-				<div class="row">
-					<span class="label">Also search with<small>Web pages only</small></span>
-					<span class="keys" id="search-key"></span>
-					<button id="search-reset" hidden>Reset</button>
-					<button id="search-change">Change</button>
+		<div class="panels">
+			<div id="general" role="tabpanel">
+				<section>
+					<h2>Shortcuts</h2>
+					<div class="group">
+						<div class="row">
+							<span class="label">Switch tabs</span>
+							<span class="keys" id="switch-key"></span>
+							<button id="switch-change">Change</button>
+						</div>
+						<div class="row">
+							<span class="label">Search tabs</span>
+							<span class="keys" id="find-key"></span>
+							<button id="find-change">Change</button>
+						</div>
+						<div class="row">
+							<span class="label">Also search with<small>Web pages only</small></span>
+							<span class="keys" id="search-key"></span>
+							<button id="search-reset" hidden>Reset</button>
+							<button id="search-change">Change</button>
+						</div>
+					</div>
+					<p class="note" id="note"></p>
+				</section>
+
+				<section>
+					<h2>Behavior</h2>
+					<div class="group">
+						<label class="row">
+							<span class="label">Switch when search finds one tab</span>
+							<input type="checkbox" id="auto-switch" />
+						</label>
+						<label class="row">
+							<span class="label">Include recently closed tabs in search</span>
+							<input type="checkbox" id="include-closed" />
+						</label>
+						<label class="row">
+							<span class="label">Cycle through this window's tabs only</span>
+							<input type="checkbox" id="this-window-only" />
+						</label>
+						<label class="row">
+							<span class="label">Show timings<small>For debugging: how long each step of a switch takes</small></span>
+							<input type="checkbox" id="show-timings" />
+						</label>
+					</div>
+				</section>
+
+				<div class="ad" id="profiles-ad" hidden>
+					<span class="label"><strong id="profiles-ad-title">Use more than one Chrome profile?</strong><span id="profiles-ad-text">Switch between them, search all their tabs, and open links in the right one.</span></span>
+					<button id="profiles-learn">Learn more</button>
+					<button id="profiles-ad-hide" aria-label="Hide" title="Don't show this again">✕</button>
 				</div>
 			</div>
-			<p class="note" id="note"></p>
-		</section>
 
-		<section>
-			<h2>Behavior</h2>
-			<div class="group">
-				<label class="row">
-					<span class="label">Switch when search finds one tab</span>
-					<input type="checkbox" id="auto-switch" />
-				</label>
-				<label class="row">
-					<span class="label">Include recently closed tabs in search</span>
-					<input type="checkbox" id="include-closed" />
-				</label>
-				<label class="row">
-					<span class="label">Cycle through this window's tabs only</span>
-					<input type="checkbox" id="this-window-only" />
-				</label>
-				<label class="row">
-					<span class="label">Show timings</span>
-					<input type="checkbox" id="show-timings" />
-				</label>
+			<!-- only once the profile helper is set up (profiles.js) -->
+			<div id="profiles" role="tabpanel" hidden>
+				<div class="group identity">
+					<button id="mark-open" title="Choose this profile's icon" aria-label="Choose this profile's icon">
+						<span id="mark-preview"></span>
+					</button>
+					<div class="identity-text">
+						<span class="name-field">
+							<input type="text" id="profile-name" maxlength="40" spellcheck="false" aria-label="This profile's name" title="This profile's name" />
+							<span class="saved" id="name-saved" aria-hidden="true">Saved</span>
+						</span>
+						<span class="status"><span class="dot" id="profiles-dot"></span><span id="profiles-status"></span></span>
+						<small id="profiles-detail"></small>
+					</div>
+					<!-- only when the helper can't be reached -->
+					<button id="profiles-retry" hidden>Reconnect</button>
+				</div>
+
+				<section>
+					<h2>Switching</h2>
+					<div class="group">
+						<div class="row">
+							<span class="label">Switch profiles</span>
+							<span class="keys" id="profile-keys"></span>
+							<button id="profile-keys-change">Change</button>
+						</div>
+						<label class="row">
+							<span class="label">Search tabs in every profile</span>
+							<input type="checkbox" data-shared="searchAll" />
+						</label>
+						<label class="row">
+							<span class="label">Find profiles by name in search<small>Type a profile's name to switch to it</small></span>
+							<input type="checkbox" data-shared="searchProfiles" />
+						</label>
+					</div>
+				</section>
+
+				<section>
+					<h2>Windows and links</h2>
+					<div class="group">
+						<label class="row">
+							<span class="label">Keep profile windows stacked<small>In the same spot, so the one in front hides the rest</small></span>
+							<input type="checkbox" data-shared="stack" />
+						</label>
+						<label class="row">
+							<span class="label">Point out pages open in another profile</span>
+							<input type="checkbox" data-shared="dupes" />
+						</label>
+						<label class="row">
+							<span class="label">Move links to the profile they belong to<small>Each one can be sent back from its notice</small></span>
+							<input type="checkbox" data-shared="route" />
+						</label>
+						<div class="row" id="claims-row">
+							<span class="label">Links that open in this profile<small id="claims-summary"></small></span>
+							<button id="claims-edit">Edit</button>
+						</div>
+					</div>
+				</section>
+				<p class="note"><button id="profiles-off">Turn off profile features</button></p>
 			</div>
-		</section>
-
-		<!-- only once the profile helper is set up (profiles.js) -->
-		<section id="profiles" hidden>
-			<h2>Profiles</h2>
-			<div class="group">
-				<div class="row">
-					<span class="label"><span id="profiles-status"></span><small id="profiles-detail"></small></span>
-					<button id="profiles-setup">Connection options</button>
-				</div>
-				<div class="row">
-					<span class="label">This profile's name</span>
-					<input type="text" id="profile-name" maxlength="40" spellcheck="false" />
-				</div>
-				<button class="row nav" id="mark-open">
-					<span class="label">Profile icon<small>Shown in place of tabstack's toolbar icon</small></span>
-					<span id="mark-preview"></span>
-					<svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
-				</button>
-				<div class="row">
-					<span class="label">Switch profiles</span>
-					<span class="keys" id="profile-keys"></span>
-					<button id="profile-keys-change">Change</button>
-				</div>
-				<label class="row">
-					<span class="label">Search tabs in every profile</span>
-					<input type="checkbox" data-shared="searchAll" />
-				</label>
-				<label class="row">
-					<span class="label">Find profiles by name in search<small>Type a profile's name to switch to it</small></span>
-					<input type="checkbox" data-shared="searchProfiles" />
-				</label>
-				<label class="row">
-					<span class="label">Keep profile windows stacked<small>Each profile's window sits in the same place, so the one in front hides the rest</small></span>
-					<input type="checkbox" data-shared="stack" />
-				</label>
-				<label class="row">
-					<span class="label">Point out pages open in another profile</span>
-					<input type="checkbox" data-shared="dupes" />
-				</label>
-				<label class="row">
-					<span class="label">Move links to the profile they belong to<small>Each moved link can be sent back from the notice it shows</small></span>
-					<input type="checkbox" data-shared="route" />
-				</label>
-				<div class="row stacked" id="claims-row">
-					<span class="label">Links that open in this profile<small>One per line, like corp.com, *.corp.com, github.com/acme or github.com/a*</small></span>
-					<textarea id="profile-claims" rows="3" spellcheck="false" placeholder="*.corp.com"></textarea>
-				</div>
-			</div>
-			<p class="note"><button id="profiles-off">Turn off profile features</button></p>
-		</section>
-
-		<div class="ad" id="profiles-ad" hidden>
-			<span class="label"><strong id="profiles-ad-title">Use more than one Chrome profile?</strong><span id="profiles-ad-text">Switch between them, search all their tabs, and open links in the right one.</span></span>
-			<button id="profiles-learn">Learn more</button>
-			<button id="profiles-ad-hide" aria-label="Hide" title="Don't show this again">✕</button>
 		</div>
 
 		<!-- the profile icon picker, a page of its own over the settings -->
-		<div id="mark-view" hidden>
+		<div id="mark-view" class="view" hidden>
 			<div class="view-head">
 				<button id="mark-back" class="back">
-					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>Settings
+					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>Profiles
 				</button>
 				<h1>Profile icon</h1>
 				<button id="mark-remove">Remove</button>
@@ -457,6 +578,25 @@
 			<input type="search" id="mark-search" placeholder="Search icons, or type a letter" spellcheck="false" autocomplete="off" />
 			<div class="glyphs" id="mark-glyphs" role="group" aria-label="Icon"></div>
 			<p class="note" id="mark-empty" hidden>No icons match. Type a single letter or number to use it instead.</p>
+		</div>
+
+		<!-- the links that belong to this profile, a page of its own -->
+		<div id="links-view" class="view" hidden>
+			<div class="view-head">
+				<button id="links-back" class="back">
+					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>Profiles
+				</button>
+				<h1>Links</h1>
+				<span></span>
+			</div>
+			<p class="lede">Links to these sites open in this profile, whichever profile you click them in. One per line.</p>
+			<textarea id="profile-claims" rows="8" spellcheck="false" placeholder="*.corp.com"></textarea>
+			<div class="group patterns">
+				<div class="row"><code>corp.com</code><span class="label">that site, and www.corp.com</span></div>
+				<div class="row"><code>*.corp.com</code><span class="label">and every subdomain</span></div>
+				<div class="row"><code>github.com/acme</code><span class="label">that path, and everything under it</span></div>
+				<div class="row"><code>github.com/a*</code><span class="label">every path starting with /a</span></div>
+			</div>
 		</div>
 
 		<script src="shared.js"></script>
