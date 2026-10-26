@@ -28,7 +28,14 @@ const WARNING_ICONS = { 16: "icons/warning-16.png", 32: "icons/warning-32.png" }
 const RESTRICTED =
 	/^(chrome|chrome-extension|chrome-search|chrome-untrusted|devtools|edge|about|moz-extension|view-source|data|file):|^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|addons\.mozilla\.org)\//;
 
+// Pages that are a call by their address alone. A call is usually known by
+// its page turning on the microphone or camera (media.js), but not in a tab
+// opened before tabstack was, or in Firefox.
+const CALL_PAGES =
+	/^https:\/\/(meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}\b|([\w-]+\.)?zoom\.us\/wc\/|app\.slack\.com\/huddle\/|meet\.jit\.si\/[^/?#]+)/;
+
 let stack = []; // tab ids, most recent first
+const inCall = new Map(); // tab id -> ids of its frames using the microphone or camera
 const thumbs = new Map(); // tab id -> data URL
 const savedThumbs = new Map(); // page URL -> data URL, from earlier sessions
 let savedIndex = []; // page URLs with a saved thumbnail, most recent first
@@ -67,6 +74,9 @@ async function load() {
 		if (key.startsWith("thumb:") && ids.has(id)) thumbs.set(id, value);
 	}
 	for (const [key, value] of Object.entries(saved.icons ?? {})) icons.set(key, value);
+	for (const [id, frames] of Object.entries(saved.inCall ?? {})) {
+		if (ids.has(Number(id))) inCall.set(Number(id), new Set(frames));
+	}
 
 	// Chrome can only capture the tab on screen, so tabs restored at startup
 	// show the picture from their last visit until they're seen again.
@@ -97,9 +107,26 @@ function forget(tabId) {
 	stack = stack.filter((id) => id !== tabId);
 	thumbs.delete(tabId);
 	overlayOpen.delete(tabId);
+	if (inCall.delete(tabId)) saveCalls();
 	api.storage.session.remove(`thumb:${tabId}`);
 	save();
 }
+
+// A frame's microphone or camera turned on or off (media.js, by way of relay.js).
+function onMedia(tabId, frameId, live) {
+	const frames = inCall.get(tabId) ?? new Set();
+	if (live) frames.add(frameId);
+	else frames.delete(frameId);
+	if (frames.size) inCall.set(tabId, frames);
+	else inCall.delete(tabId);
+	saveCalls();
+}
+
+function saveCalls() {
+	api.storage.session.set({ inCall: Object.fromEntries([...inCall].map(([id, frames]) => [id, [...frames]])) });
+}
+
+const isCall = (tab) => inCall.has(tab.id) || CALL_PAGES.test(tab.url ?? "");
 
 // --- tab tracking ---
 
@@ -389,6 +416,7 @@ async function snapshot(currentId, { forSearch = false } = {}) {
 			url: t.url,
 			icon: iconFor(t),
 			audible: !!t.audible && !t.mutedInfo?.muted,
+			call: isCall(t),
 			thumb: forSearch ? null : (thumbs.get(t.id) ?? savedThumbs.get(t.url) ?? null),
 		};
 	});
@@ -741,6 +769,9 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 			return true;
 		case "toastAction":
 			profiles?.onToastAction(msg.id);
+			break;
+		case "media":
+			if (tabId != null) ready.then(() => onMedia(tabId, sender.frameId ?? 0, msg.live));
 			break;
 		case "open":
 			overlayOpen.add(tabId);

@@ -37,6 +37,9 @@ const manifest = {
 	// working across profiles (profiles.js, and the helper's optional
 	// permissions) is Chrome only for now
 	commands: Object.fromEntries(Object.entries(commands).filter(([name]) => !name.startsWith("profile-"))),
+	// Manifest V2 can't run a script in the page's own world, which media.js
+	// needs to see a call start; Firefox knows calls by their address alone
+	content_scripts: rest.content_scripts.filter((script) => script.world !== "MAIN"),
 	browser_specific_settings: {
 		gecko: {
 			id: "tabstack@alethi.dev",
@@ -46,7 +49,7 @@ const manifest = {
 	},
 };
 
-const CHROME_ONLY = ["profiles.js", "setup.html", "setup.js"];
+const CHROME_ONLY = ["profiles.js", "setup.html", "setup.js", "media.js"];
 
 // earlier versions' zips stay, so the one a store is still reviewing is kept
 rmSync(firefox, { recursive: true, force: true });

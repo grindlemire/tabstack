@@ -1,10 +1,21 @@
-// Runs in iframes only, and is kept tiny because it loads into every frame on
-// every page. Forwards the modifier release and the search shortcut to the
-// top frame, which owns the overlay (content.js).
+// Kept tiny because it loads into every frame on every page. In every frame,
+// it passes on the page turning its microphone or camera on or off (media.js).
+// In iframes, it also forwards the modifier release and the search shortcut
+// to the top frame, which owns the overlay (content.js).
 
 (() => {
-	if (window === window.top) return;
 	const api = globalThis.browser ?? globalThis.chrome;
+
+	addEventListener("message", (e) => {
+		if (e.source !== window || e.data?.tabstack !== "media") return;
+		try {
+			api.runtime.sendMessage({ type: "media", live: !!e.data.live }).catch(() => {});
+		} catch {
+			// orphaned by an extension reload
+		}
+	});
+
+	if (window === window.top) return;
 	const isMac = /Mac/.test(navigator.platform);
 	const MODIFIERS = ["Meta", "Control", "Alt", "Shift"];
 	const controller = new AbortController();
