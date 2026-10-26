@@ -255,7 +255,7 @@
 		if (wasOpen || !result) return;
 		const elsewhere = await send({ type: "tabsElsewhere" });
 		if (elsewhere?.tabs?.length || elsewhere?.closed?.length || elsewhere?.profiles?.length) {
-			s.addResults(elsewhere.tabs, elsewhere.closed, elsewhere.profiles);
+			s.addResults(elsewhere.tabs, elsewhere.closed, elsewhere.profiles, elsewhere.marks);
 		}
 	}
 
@@ -294,6 +294,12 @@
 	.toast { --bg: rgba(30, 30, 32, 0.92); --fg: #f5f5f7; --line: rgba(255, 255, 255, 0.12); --accent: #5b85ff; }
 }
 .text { flex: 1; min-width: 0; }
+/* the other profile's mark */
+.mark { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-left: -4px; font-size: 12px; font-weight: 700; line-height: 1; border-radius: 6px; }
+.mark svg { width: 14px; height: 14px; }
+.mark.solid { color: var(--ink); background: var(--mark); }
+.mark.clear { color: var(--mark); }
+.mark.clear svg { width: 22px; height: 22px; }
 button {
 	flex: none;
 	padding: 5px 10px;
@@ -320,7 +326,8 @@ button.dismiss:hover { opacity: 1; }
 		toastEl = null;
 	}
 
-	function showToast({ id, text, action }) {
+	// mark is the other profile's, when it has one
+	function showToast({ id, text, action, mark }) {
 		hideToast();
 		toastEl = document.createElement("tabstack-toast");
 		const root = toastEl.attachShadow({ mode: "closed" });
@@ -342,6 +349,7 @@ button.dismiss:hover { opacity: 1; }
 		const dismiss = Object.assign(document.createElement("button"), { className: "dismiss", textContent: "✕" });
 		dismiss.setAttribute("aria-label", "Dismiss");
 		dismiss.addEventListener("click", hideToast);
+		if (mark) box.append(TabstackShared.markElement(mark, mark.path));
 		box.append(label, go, dismiss);
 		root.append(box);
 		(document.body ?? document.documentElement).append(toastEl);

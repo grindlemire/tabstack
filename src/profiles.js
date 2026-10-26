@@ -54,6 +54,16 @@ globalThis.TabstackProfiles = (() => {
 		return peers[i]?.info?.name || (i >= 0 ? `Profile ${i + 1}` : "another profile");
 	}
 
+	// A profile's mark, with its icon's path filled in from this copy's
+	// icons, so it's drawn the same here as there. Profiles share only the
+	// mark itself, since what they share goes to every profile on any change.
+	function markOf(id) {
+		const mark = peers.find((p) => p.profile === id)?.info?.mark;
+		if (!mark) return null;
+		const path = mark.icon && globalThis.TabstackIcons?.[mark.icon];
+		return { ...mark, ...(path && { path }) };
+	}
+
 	// --- connecting ---
 
 	function init(h) {
@@ -163,7 +173,7 @@ globalThis.TabstackProfiles = (() => {
 			profile,
 			windows: windows.length,
 			// where tells tabstack-host install which of the browser's profiles this is
-			info: { name: local.name, claims: local.claims, where: local.where, done: local.done, shared },
+			info: { name: local.name, mark: local.mark, claims: local.claims, where: local.where, done: local.done, shared },
 		});
 	}
 
@@ -377,25 +387,26 @@ globalThis.TabstackProfiles = (() => {
 		return answer;
 	}
 
-	// Every other profile's tabs, labeled with the profile they're in.
 	// Every other profile's tabs, labeled with the profile they're in, and
-	// the profiles themselves, so typing one's name switches to it.
+	// the profiles themselves, so typing one's name switches to it. Their
+	// marks come once, by profile, rather than with every tab.
 	async function searchOthers() {
 		const tabs = [];
 		const closed = [];
-		if (!connected) return { tabs, closed, profiles: [] };
+		if (!connected) return { tabs, closed, profiles: [], marks: {} };
+		const marks = Object.fromEntries(others().flatMap((p) => (markOf(p.profile) ? [[p.profile, markOf(p.profile)]] : [])));
 		const profiles = shared.values.searchProfiles
 			? others()
 					.filter((p) => p.windows > 0)
 					.map((p) => ({ profileSwitch: true, profile: p.profile, title: nameOf(p.profile), subtitle: "Switch to this profile" }))
 			: [];
-		if (!shared.values.searchAll) return { tabs, closed, profiles };
+		if (!shared.values.searchAll) return { tabs, closed, profiles, marks };
 		for (const answer of await ask("*", { kind: "tabs" })) {
 			const label = { profile: answer.from, profileName: nameOf(answer.from) };
 			tabs.push(...(answer.tabs ?? []).map((t) => ({ ...t, ...label })));
 			closed.push(...(answer.closed ?? []).map((t) => ({ ...t, ...label })));
 		}
-		return { tabs, closed, profiles };
+		return { tabs, closed, profiles, marks };
 	}
 
 	// Brings another profile forward, as the shortcut does.
@@ -484,6 +495,7 @@ globalThis.TabstackProfiles = (() => {
 		if (toast) toastWhenLoaded(tab.id, {
 			text: `Opened here from ${nameOf(from)}`,
 			action: `Open in ${nameOf(from)}`,
+			mark: markOf(from),
 			run: async () => {
 				const now = await api.tabs.get(tab.id).catch(() => null);
 				// sent back for good: the other profile opens it without moving it again
@@ -572,6 +584,7 @@ globalThis.TabstackProfiles = (() => {
 		toast(tab.id, {
 			text: `Already open in ${nameOf(hit.from)}`,
 			action: "Go there",
+			mark: markOf(hit.from),
 			run: () => {
 				api.tabs.remove(tab.id).catch(() => {});
 				activateIn(hit.from, hit.tab.id, hit.tab.windowId);
@@ -593,11 +606,12 @@ globalThis.TabstackProfiles = (() => {
 
 	// --- notices on the page (content.js) ---
 
-	function toast(tabId, { text, action, run }) {
+	// mark is the profile the notice is about, drawn beside it
+	function toast(tabId, { text, action, run, mark = null }) {
 		const id = crypto.randomUUID();
 		toastActions.set(id, run);
 		setTimeout(() => toastActions.delete(id), TOAST_ACTION_FOR);
-		api.tabs.sendMessage(tabId, { type: "toast", id, text, action }, { frameId: 0 }).catch(() => {});
+		api.tabs.sendMessage(tabId, { type: "toast", id, text, action, mark }, { frameId: 0 }).catch(() => {});
 	}
 
 	function toastWhenLoaded(tabId, t) {
@@ -675,6 +689,7 @@ globalThis.TabstackProfiles = (() => {
 		if (changes.profileMark) {
 			local.mark = changes.profileMark.newValue ?? null;
 			publishLabel();
+			sendState(); // the other profiles show it too
 		}
 		if (!(changes.profileName || changes.profileClaims || changes.profileWhere || changes.setupDone)) return;
 		if (changes.profileName) {

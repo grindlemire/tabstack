@@ -163,22 +163,41 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 .row.selected .audible { color: inherit; }
 .profile {
 	flex: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
 	max-width: 120px;
 	padding: 1px 7px;
-	overflow: hidden;
 	white-space: nowrap;
-	text-overflow: ellipsis;
 	font-size: 11px;
 	color: var(--muted);
 	background: var(--card);
 	border-radius: 9px;
 }
+.profile-name { overflow: hidden; text-overflow: ellipsis; }
 .row.selected .profile { color: #fff; background: rgba(255, 255, 255, 0.2); }
+
+/* another profile's mark: by its tabs' names, and as the profile to switch to */
+.row .mark { flex: none; display: inline-grid; place-items: center; font-weight: 700; line-height: 1; }
+.row .mark.solid { color: var(--ink); background: var(--mark); }
+.row .mark.clear { color: var(--mark); }
+.row.selected .mark.clear { color: inherit; }
+.row .mark.favicon { font-size: 10px; border-radius: 4px; }
+.row .mark.favicon svg { width: 11px; height: 11px; }
+.row .mark.favicon.clear svg { width: 16px; height: 16px; }
+.profile .mark { width: 12px; height: 12px; margin-left: -3px; font-size: 8px; border-radius: 3px; }
+.profile .mark svg { width: 8px; height: 8px; }
+.profile .mark.clear svg { width: 12px; height: 12px; }
+
+/* other profiles' rows, arriving a moment after this one's */
+.row.arriving { animation: arriving 0.3s ease-out both; }
+@keyframes arriving { from { opacity: 0; transform: translateY(-3px); } }
 .debug { margin-top: 8px; font: 11px/1.4 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre-wrap; }
 .debug:empty { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
 	.panel[popover], .ring { transition: none; }
+	.row.arriving { animation: none; }
 }
 `;
 
@@ -399,6 +418,8 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.tabs = [];
 			this.closed = [];
 			this.profiles = []; // other profiles, to switch to by name
+			this.profileMarks = {}; // profile -> its mark, to show by its rows
+			this.arriving = null; // rows just added, which fade in
 			this.results = [];
 			this.selected = 0;
 			this.drawn = null; // what render() last drew, so select() can patch it
@@ -462,6 +483,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.debug.textContent = "";
 			this.removed.clear();
 			this.profiles = [];
+			this.profileMarks = {};
 			// the ring shouldn't slide over from where the last session left it
 			this.ring.classList.add("instant");
 			requestAnimationFrame(() => this.ring.classList.remove("instant"));
@@ -477,15 +499,18 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 		}
 
 		// Other profiles' tabs, and the profiles themselves, which arrive
-		// after this one's tabs. The selection stays put, and a lone match
-		// doesn't switch on its own, since the list just changed under the
-		// person typing.
-		addResults(tabs, closed, profiles = []) {
+		// after this one's tabs, with each profile's mark. The selection stays
+		// put, and a lone match doesn't switch on its own, since the list just
+		// changed under the person typing. They fade in, the once.
+		addResults(tabs, closed, profiles = [], marks = {}) {
 			if (!this.isOpen || this.mode !== "search") return;
 			this.tabs = [...this.tabs, ...tabs];
 			this.closed = [...this.closed, ...closed];
 			this.profiles = profiles;
+			this.profileMarks = marks;
+			this.arriving = new Set([...tabs, ...closed, ...profiles]);
 			this.filter({ keepSelection: true });
+			this.arriving = null;
 		}
 
 		search() {
@@ -660,14 +685,24 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.results.slice(0, count).forEach(({ item, marks }, i) => {
 				if (item.closed && !this.results[i - 1]?.item.closed) nodes.push(el("div", "divider", "Recently closed"));
 				const row = el("div", `row${item.closed ? " closed" : ""}${i === this.selected ? " selected" : ""}`);
+				if (this.arriving?.has(item)) row.classList.add("arriving");
 				const text = el("div", "text");
 				text.append(
 					marked(item.title || host(item.url), marks?.title, "title"),
 					item.subtitle ? el("div", "url", item.subtitle) : marked(host(item.url), marks?.site, "url"),
 				);
-				row.append(favicon(item), text);
+				// a profile to switch to shows as its mark; another profile's
+				// tab carries its mark by its name
+				const profileMark = item.profile && this.profileMarks[item.profile];
+				const mark = (className) => TabstackShared.markElement(profileMark, profileMark.path, className);
+				row.append(item.profileSwitch && profileMark ? mark("favicon") : favicon(item), text);
 				if (item.audible) row.append(speaker());
-				if (item.profileName) row.append(el("span", "profile", item.profileName));
+				if (item.profileName) {
+					const pill = el("span", "profile");
+					if (profileMark) pill.append(mark());
+					pill.append(el("span", "profile-name", item.profileName));
+					row.append(pill);
+				}
 				row.addEventListener("click", () => {
 					this.selected = i;
 					this.commit();

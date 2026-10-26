@@ -57,9 +57,9 @@ globalThis.TabstackShared = (() => {
 	// A profile's mark ({ icon or glyph, color, style }) as an element, for
 	// the page to size: its icon, or its letter. A solid mark is drawn on its
 	// color, and a clear one in it.
-	function markElement(mark, path) {
+	function markElement(mark, path, className = "") {
 		const node = document.createElement("span");
-		node.className = `mark ${mark.style === "clear" ? "clear" : "solid"}`;
+		node.className = `mark ${mark.style === "clear" ? "clear" : "solid"} ${className}`.trim();
 		node.style.setProperty("--mark", mark.color);
 		node.style.setProperty("--ink", inkOn(mark.color));
 		if (path) node.append(iconSvg(path));

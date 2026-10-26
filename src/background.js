@@ -433,7 +433,7 @@ function restoreItem({ sessionId, profile }) {
 }
 
 async function searchOthers() {
-	return (await profiles?.searchOthers()) ?? { tabs: [], closed: [], profiles: [] };
+	return (await profiles?.searchOthers()) ?? { tabs: [], closed: [], profiles: [], marks: {} };
 }
 
 // --- the switch command ---
