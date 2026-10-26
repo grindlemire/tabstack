@@ -1,0 +1,137 @@
+package main
+
+import (
+	"fmt"
+	"io"
+	"slices"
+	"strings"
+)
+
+// commands, for completion: each with what it does, and whether its
+// arguments are profiles (all of them, or just the first).
+var commands = []struct {
+	name, about string
+	profiles    string // "all", "first" or ""
+}{
+	{"install", "find tabstack in every profile and connect each", ""},
+	{"list", "every profile, and how it's connected", ""},
+	{"connect", "connect profiles", "all"},
+	{"disconnect", "stop profiles connecting", "all"},
+	{"reset", "clear a profile's name and links", "all"},
+	{"rename", "change the name other profiles show", "first"},
+	{"links", "the links that open in a profile", "first"},
+	{"uninstall", "disconnect every profile and unregister the helper", ""},
+	{"open", "open links in the profile they belong to", ""},
+	{"tabs", "every profile's tabs, most recent first", ""},
+	{"focus", "bring a profile forward, or one of its tabs", "first"},
+	{"doctor", "check the setup, and fix what it can", ""},
+	{"version", "which tabstack-host this is", ""},
+	{"completion", "shell completion for bash, zsh or fish", ""},
+}
+
+// completion prints the script that completes these commands in a shell,
+// for Homebrew to install or to source from a shell's startup file.
+func completion(w io.Writer, shell string) error {
+	var names, all, first, described, fish string
+	for _, c := range commands {
+		names += " " + c.name
+		// a ' ends a single-quoted string, in zsh by '\'' and in fish by \'
+		described += fmt.Sprintf("\n    '%s:%s'", c.name, strings.ReplaceAll(c.about, "'", `'\''`))
+		fish += fmt.Sprintf("complete -c tabstack-host -n __fish_use_subcommand -a %s -d '%s'\n", c.name, strings.ReplaceAll(c.about, "'", `\'`))
+		switch c.profiles {
+		case "all":
+			all += "|" + c.name
+		case "first":
+			first += "|" + c.name
+		}
+	}
+	all, first = all[1:], first[1:]
+	switch shell {
+	case "bash":
+		fmt.Fprintf(w, bashCompletion, names[1:], all, first)
+	case "zsh":
+		fmt.Fprintf(w, zshCompletion, described, all, first)
+	case "fish":
+		fmt.Fprint(w, fish)
+		fmt.Fprintf(w, fishProfiles, strings.ReplaceAll(all, "|", " "), strings.ReplaceAll(first, "|", " "))
+	default:
+		return fmt.Errorf("completion is for bash, zsh or fish, not %q", shell)
+	}
+	return nil
+}
+
+// completeProfiles prints what each profile can be called, one per line,
+// for the completion scripts.
+func completeProfiles(w io.Writer) error {
+	s, err := openSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	var seen []string
+	for _, e := range s.entries {
+		if e.p.id == "" && e.peer == nil {
+			continue
+		}
+		if name := e.name(); !slices.Contains(seen, name) {
+			seen = append(seen, name)
+			fmt.Fprintln(w, name)
+		}
+	}
+	return nil
+}
+
+const bashCompletion = `_tabstack_host() {
+  local cur=${COMP_WORDS[COMP_CWORD]}
+  if (( COMP_CWORD == 1 )); then
+    COMPREPLY=($(compgen -W "%s" -- "$cur"))
+    return
+  fi
+  case ${COMP_WORDS[1]} in
+    %s) ;;
+    %s) (( COMP_CWORD == 2 )) || return ;;
+    completion) COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur")); return ;;
+    *) return ;;
+  esac
+  local IFS=$'\n' name
+  COMPREPLY=()
+  # one at a time: macOS's bash 3.2 joins "${a[@]// /\\ }" into one word
+  for name in $(compgen -W "$(tabstack-host __profiles 2>/dev/null)" -- "$cur"); do
+    COMPREPLY+=("${name// /\\ }")
+  done
+}
+complete -F _tabstack_host tabstack-host
+`
+
+const zshCompletion = `#compdef tabstack-host
+
+_tabstack_host() {
+  local -a commands profiles
+  commands=(%s
+  )
+  if (( CURRENT == 2 )); then
+    _describe command commands
+    return
+  fi
+  case $words[2] in
+    %s) ;;
+    %s) (( CURRENT == 3 )) || return ;;
+    completion) compadd bash zsh fish; return ;;
+    *) return ;;
+  esac
+  profiles=("${(@f)$(tabstack-host __profiles 2>/dev/null)}")
+  compadd -a profiles
+}
+
+if [ "$funcstack[1]" = "_tabstack_host" ]; then
+  _tabstack_host "$@"
+else
+  compdef _tabstack_host tabstack-host
+fi
+`
+
+const fishProfiles = `complete -c tabstack-host -f
+complete -c tabstack-host -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
+complete -c tabstack-host -n '__fish_seen_subcommand_from %s' -a '(tabstack-host __profiles 2>/dev/null)'
+complete -c tabstack-host -n '__fish_seen_subcommand_from %s; and test (count (commandline -opc)) -eq 2' -a '(tabstack-host __profiles 2>/dev/null)'
+`

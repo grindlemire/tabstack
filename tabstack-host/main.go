@@ -32,6 +32,14 @@ Usage:
   tabstack-host links <profile> [add|remove <pattern>...]
                                          the links that open in a profile
   tabstack-host uninstall                disconnect every profile and unregister the helper
+
+  tabstack-host open [--profile <profile>] <link>...
+                                         open links in the profile they belong to
+  tabstack-host tabs [--json] [<words>]  every profile's tabs, most recent first
+  tabstack-host focus <profile> [<tab>]  bring a profile forward, or one of its tabs
+
+  tabstack-host doctor                   check the setup, and fix what it can
+  tabstack-host completion bash|zsh|fish shell completion for these commands
   tabstack-host version                  which tabstack-host this is
 
 A <profile> is its number from list, its name, or its folder ("Profile 1").
@@ -99,6 +107,21 @@ func run(args []string, stdout io.Writer) error {
 		return links(stdout, args)
 	case "uninstall":
 		return uninstall(stdout)
+	case "doctor":
+		return doctor(stdout)
+	case "completion":
+		if len(args) != 1 {
+			return errors.New("tabstack-host completion bash|zsh|fish")
+		}
+		return completion(stdout, args[0])
+	case "__profiles":
+		return completeProfiles(stdout)
+	case "open":
+		return open(stdout, args)
+	case "tabs":
+		return tabs(stdout, args)
+	case "focus":
+		return focus(stdout, args)
 	case "version", "--version":
 		fmt.Fprintln(stdout, "tabstack-host", version)
 		return nil
