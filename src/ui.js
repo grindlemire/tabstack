@@ -160,7 +160,9 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 	text-transform: uppercase;
 }
 .audible { flex: none; width: 13px; height: 13px; color: var(--muted); }
-.row.selected .audible { color: inherit; }
+/* on a call: red, like a recording light */
+.call { flex: none; width: 13px; height: 13px; color: #e5484d; }
+.row.selected .audible, .row.selected .call { color: inherit; }
 .profile {
 	flex: none;
 	display: inline-flex;
@@ -245,19 +247,37 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 		return el("span", "favicon letter", (host(item.url) || item.title || "?")[0]);
 	}
 
-	function speaker() {
+	function glyph(className, d) {
 		const ns = "http://www.w3.org/2000/svg";
 		const svg = document.createElementNS(ns, "svg");
 		svg.setAttribute("viewBox", "0 0 16 16");
-		svg.setAttribute("class", "audible");
+		svg.setAttribute("class", className);
 		const path = document.createElementNS(ns, "path");
 		path.setAttribute("fill", "currentColor");
-		path.setAttribute(
-			"d",
-			"M2 6h2.5L8 3v10L4.5 10H2zM10.5 5.2a4 4 0 0 1 0 5.6l-.9-.9a2.7 2.7 0 0 0 0-3.8zM12.3 3.4a6.5 6.5 0 0 1 0 9.2l-.9-.9a5.2 5.2 0 0 0 0-7.4z",
-		);
+		path.setAttribute("d", d);
 		svg.append(path);
 		return svg;
+	}
+
+	const speaker = () =>
+		glyph(
+			"audible",
+			"M2 6h2.5L8 3v10L4.5 10H2zM10.5 5.2a4 4 0 0 1 0 5.6l-.9-.9a2.7 2.7 0 0 0 0-3.8zM12.3 3.4a6.5 6.5 0 0 1 0 9.2l-.9-.9a5.2 5.2 0 0 0 0-7.4z",
+		);
+
+	// a microphone, for a tab on a call
+	const microphone = () =>
+		glyph(
+			"call",
+			"M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1zM3.75 6.75a.75.75 0 0 1 .75.75 3.5 3.5 0 0 0 7 0 .75.75 0 0 1 1.5 0 5 5 0 0 1-4.25 4.94V14h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.56A5 5 0 0 1 3 7.5a.75.75 0 0 1 .75-.75z",
+		);
+
+	// What a tab's doing, by its title: on a call, or playing sound.
+	function live(item) {
+		const icons = [];
+		if (item.call) icons.push(microphone());
+		if (item.audible) icons.push(speaker());
+		return icons;
 	}
 
 	// Text with the matched ranges wrapped in <mark>.
@@ -363,6 +383,8 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			{ name: "title", text: (item.title ?? "").toLowerCase(), weight: 1 },
 			{ name: "site", text: host(item.url).toLowerCase(), weight: 0.9 },
 			{ name: null, text: (item.url ?? "").toLowerCase(), weight: 0.5, noTypos: true },
+			// what it's doing, so "call" or "sound" finds it
+			{ name: null, text: `${item.call ? "call meeting " : ""}${item.audible ? "sound playing audio" : ""}`, weight: 0.95, noTypos: true },
 		];
 		const marks = { title: [], site: [] };
 		let total = 0;
@@ -552,19 +574,28 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			if (count) this.select((this.selected + delta + count) % count);
 		}
 
+		// keepSelection keeps the same row selected, wherever it moves to (another
+		// profile's call can arrive above it), or failing that, the same place.
 		filter({ keepSelection = false } = {}) {
 			const query = this.input.value.trim();
+			const kept = keepSelection ? this.results[this.selected]?.item : null;
 			// the tab you're on is never a result; closed tabs and profiles show
 			// once you type, and a profile whose name matches comes first
 			const candidates = [...this.tabs.slice(1), ...(query ? [...this.closed, ...this.profiles] : [])];
-			const ranked = rank(candidates, query);
+			let ranked = rank(candidates, query);
+			// before anything's typed, a call comes first, then what's playing
+			if (!query) {
+				const order = (r) => (r.item.call ? 0 : r.item.audible ? 1 : 2);
+				ranked = ranked.map((r, i) => [r, i]).sort((a, b) => order(a[0]) - order(b[0]) || a[1] - b[1]).map(([r]) => r);
+			}
 			this.results = [...ranked.filter((r) => r.item.profileSwitch), ...ranked.filter((r) => !r.item.profileSwitch)];
 			clearTimeout(this.autoTimer);
 			const only = this.results.length === 1 && this.results[0].item;
 			if (this.autoSwitch && query && only && !only.closed && !keepSelection) {
 				this.autoTimer = setTimeout(() => this.commit(), AUTO_SWITCH_DELAY);
 			}
-			this.select(keepSelection ? Math.min(this.selected, this.results.length - 1) : 0);
+			const at = kept ? this.results.findIndex((r) => r.item === kept) : -1;
+			this.select(at >= 0 ? at : keepSelection ? Math.min(this.selected, this.results.length - 1) : 0);
 		}
 
 		commit() {
@@ -655,7 +686,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 				});
 				const label = el("div", "label");
 				label.append(favicon(tab), el("span", "title", tab.title || host(tab.url)));
-				if (tab.audible) label.append(speaker());
+				label.append(...live(tab));
 				card.append(this.thumb(tab), label);
 				return card;
 			});
@@ -696,7 +727,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 				const profileMark = item.profile && this.profileMarks[item.profile];
 				const mark = (className) => TabstackShared.markElement(profileMark, profileMark.path, className);
 				row.append(item.profileSwitch && profileMark ? mark("favicon") : favicon(item), text);
-				if (item.audible) row.append(speaker());
+				row.append(...live(item));
 				if (item.profileName) {
 					const pill = el("span", "profile");
 					if (profileMark) pill.append(mark());
