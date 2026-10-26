@@ -14,7 +14,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -34,7 +33,8 @@ const prefsDelay = 15 * time.Second
 type browser struct {
 	name    string
 	dataDir string
-	exe     string // the browser's executable: a path on macOS, a command on Linux
+	exe     string   // the browser's executable: a path on macOS, a command on Linux
+	args    []string // to start it with, before the rest
 }
 
 func (b browser) manifest() string {
@@ -48,32 +48,33 @@ func (b browser) installed() bool {
 }
 
 func knownBrowsers(home string) []browser {
-	// "name;data dir;executable" stands in for them all, for end-to-end tests
+	// "name;data dir;executable" stands in for them all, for end-to-end tests,
+	// started on that data dir rather than the browser's own
 	if spec := strings.SplitN(os.Getenv("TABSTACK_TEST_BROWSER"), ";", 3); len(spec) == 3 {
-		return []browser{{spec[0], spec[1], spec[2]}}
+		return []browser{{spec[0], spec[1], spec[2], []string{"--user-data-dir=" + spec[1]}}}
 	}
 	switch runtime.GOOS {
 	case "darwin":
 		as := filepath.Join(home, "Library", "Application Support")
 		app := func(name string) string { return filepath.Join(name+".app", "Contents", "MacOS", name) }
 		return []browser{
-			{"Google Chrome", filepath.Join(as, "Google", "Chrome"), app("Google Chrome")},
-			{"Google Chrome Beta", filepath.Join(as, "Google", "Chrome Beta"), app("Google Chrome Beta")},
-			{"Google Chrome Canary", filepath.Join(as, "Google", "Chrome Canary"), app("Google Chrome Canary")},
-			{"Brave", filepath.Join(as, "BraveSoftware", "Brave-Browser"), app("Brave Browser")},
-			{"Microsoft Edge", filepath.Join(as, "Microsoft Edge"), app("Microsoft Edge")},
-			{"Chromium", filepath.Join(as, "Chromium"), app("Chromium")},
-			{"Vivaldi", filepath.Join(as, "Vivaldi"), app("Vivaldi")},
+			{"Google Chrome", filepath.Join(as, "Google", "Chrome"), app("Google Chrome"), nil},
+			{"Google Chrome Beta", filepath.Join(as, "Google", "Chrome Beta"), app("Google Chrome Beta"), nil},
+			{"Google Chrome Canary", filepath.Join(as, "Google", "Chrome Canary"), app("Google Chrome Canary"), nil},
+			{"Brave", filepath.Join(as, "BraveSoftware", "Brave-Browser"), app("Brave Browser"), nil},
+			{"Microsoft Edge", filepath.Join(as, "Microsoft Edge"), app("Microsoft Edge"), nil},
+			{"Chromium", filepath.Join(as, "Chromium"), app("Chromium"), nil},
+			{"Vivaldi", filepath.Join(as, "Vivaldi"), app("Vivaldi"), nil},
 		}
 	case "linux":
 		cfg := filepath.Join(home, ".config")
 		return []browser{
-			{"Google Chrome", filepath.Join(cfg, "google-chrome"), "google-chrome"},
-			{"Google Chrome Beta", filepath.Join(cfg, "google-chrome-beta"), "google-chrome-beta"},
-			{"Brave", filepath.Join(cfg, "BraveSoftware", "Brave-Browser"), "brave-browser"},
-			{"Microsoft Edge", filepath.Join(cfg, "microsoft-edge"), "microsoft-edge"},
-			{"Chromium", filepath.Join(cfg, "chromium"), "chromium"},
-			{"Vivaldi", filepath.Join(cfg, "vivaldi"), "vivaldi"},
+			{"Google Chrome", filepath.Join(cfg, "google-chrome"), "google-chrome", nil},
+			{"Google Chrome Beta", filepath.Join(cfg, "google-chrome-beta"), "google-chrome-beta", nil},
+			{"Brave", filepath.Join(cfg, "BraveSoftware", "Brave-Browser"), "brave-browser", nil},
+			{"Microsoft Edge", filepath.Join(cfg, "microsoft-edge"), "microsoft-edge", nil},
+			{"Chromium", filepath.Join(cfg, "chromium"), "chromium", nil},
+			{"Vivaldi", filepath.Join(cfg, "vivaldi"), "vivaldi", nil},
 		}
 	}
 	return nil
@@ -477,8 +478,7 @@ func waitForPeer(dir, key string, ready func(hubPeer) bool) (hubPeer, bool) {
 }
 
 // openSetup opens tabstack's setup page in one profile, telling it which
-// profile it's in and what the browser calls it. The browser is started in a
-// session of its own, so it outlives this command and its terminal.
+// profile it's in and what the browser calls it.
 func openSetup(home string, t target, run string) error {
 	q := url.Values{"where": {t.b.key(t.p)}, "name": {t.p.name}, "run": {run}}
 	page := fmt.Sprintf("chrome-extension://%s/setup.html?%s", t.p.id, q.Encode())
@@ -486,13 +486,7 @@ func openSetup(home string, t target, run string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, "--profile-directory="+t.p.dir, page)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go cmd.Wait()
-	return nil
+	return start(exe, append(t.b.args, "--profile-directory="+t.p.dir, page)...)
 }
 
 func findExe(home, exe string) (string, error) {
