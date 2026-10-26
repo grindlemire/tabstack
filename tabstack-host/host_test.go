@@ -21,7 +21,8 @@ type helper struct {
 func startHelper(t *testing.T, exe, dir string) *helper {
 	t.Helper()
 	cmd := exec.Command(exe, "chrome-extension://abcdefghijklmnopabcdefghijklmnop/")
-	cmd.Env = append(os.Environ(), "TABSTACK_HOST_DIR="+dir)
+	// a home of its own, so repairing registrations never reaches the real ones
+	cmd.Env = append(os.Environ(), "TABSTACK_HOST_DIR="+dir, "HOME="+dir)
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

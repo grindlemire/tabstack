@@ -235,6 +235,12 @@ func writeHostManifest(b browser, exe string, ids []string) error {
 	for _, id := range ids {
 		m.AllowedOrigins = append(m.AllowedOrigins, "chrome-extension://"+id+"/")
 	}
+	return saveHostManifest(b, m)
+}
+
+// saveHostManifest writes the manifest whole, by renaming a new file over
+// the old one, since the browser can read it at any time.
+func saveHostManifest(b browser, m hostManifest) error {
 	raw, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
@@ -242,7 +248,67 @@ func writeHostManifest(b browser, exe string, ids []string) error {
 	if err := os.MkdirAll(filepath.Dir(b.manifest()), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(b.manifest(), append(raw, '\n'), 0o644)
+	tmp := b.manifest() + ".new"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, b.manifest())
+}
+
+// readHostManifest reads the helper's registration with a browser; nil when
+// it isn't registered there.
+func readHostManifest(b browser) (*hostManifest, error) {
+	raw, err := os.ReadFile(b.manifest())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var m hostManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("%s: %w", b.manifest(), err)
+	}
+	return &m, nil
+}
+
+// extensionIDs are the copies of tabstack a registration lets in.
+func (m hostManifest) extensionIDs() []string {
+	var ids []string
+	for _, o := range m.AllowedOrigins {
+		ids = append(ids, strings.TrimSuffix(strings.TrimPrefix(o, "chrome-extension://"), "/"))
+	}
+	return ids
+}
+
+// repair points the helper's registration with each browser at this binary,
+// by a path that lasts, where it points at one that's gone or at this one by
+// a path that won't last (an older install from Homebrew's versioned
+// folder). One pointing at another copy that's still there is left alone. It
+// returns what it changed.
+func repair(home string) ([]string, error) {
+	self, err := selfPath()
+	if err != nil {
+		return nil, err
+	}
+	want := lastingPath(self)
+	var fixed []string
+	for _, b := range knownBrowsers(home) {
+		m, err := readHostManifest(b)
+		if err != nil || m == nil || m.Path == want {
+			continue
+		}
+		if fileExists(m.Path) && !sameFile(m.Path, self) {
+			continue
+		}
+		was := m.Path
+		m.Path = want
+		if err := saveHostManifest(b, *m); err != nil {
+			return fixed, fmt.Errorf("registering with %s: %w", b.name, err)
+		}
+		fixed = append(fixed, fmt.Sprintf("%s: pointed at %s, now %s", b.name, was, want))
+	}
+	return fixed, nil
 }
 
 // target is a profile install sets up.
@@ -256,11 +322,8 @@ type target struct {
 // isn't connected yet, where one click allows it. Then it waits for them.
 // extraIDs are allowed too, for a copy of tabstack it can't find.
 func install(w io.Writer, extraIDs []string) error {
-	exe, err := os.Executable()
+	exe, err := helperPath()
 	if err != nil {
-		return err
-	}
-	if exe, err = filepath.EvalSymlinks(exe); err != nil {
 		return err
 	}
 	home, err := os.UserHomeDir()

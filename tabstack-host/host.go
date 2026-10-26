@@ -51,7 +51,16 @@ func runHost() error {
 	// names the hub they share. Two browsers (Chrome and Brave, say) get one
 	// each, since neither can bring the other's windows forward.
 	base := filepath.Join(dir, fmt.Sprintf("hub-%d", os.Getppid()))
-	log.Printf("started by %d", os.Getppid())
+	log.Printf("started by %d (version %s)", os.Getppid(), version)
+	if home, err := os.UserHomeDir(); err == nil {
+		fixed, err := repair(home)
+		for _, f := range fixed {
+			log.Printf("repaired the registration with %s", f)
+		}
+		if err != nil {
+			log.Printf("repairing registrations: %v", err)
+		}
+	}
 	err = relay(base, os.Stdin, os.Stdout)
 	log.Printf("done: %v", err)
 	return err

@@ -99,3 +99,67 @@ func TestWatch(t *testing.T) {
 		live[0].Close()
 	}
 }
+
+// Homebrew runs the helper from a versioned folder that goes when it
+// upgrades; browsers get the opt link, which follows the upgrade.
+func TestLastingPath(t *testing.T) {
+	prefix := t.TempDir()
+	exe := filepath.Join(prefix, "Cellar", "tabstack-host", "1.2.0", "bin", "tabstack-host")
+	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastingPath(exe); got != exe {
+		t.Errorf("without an opt link, lastingPath = %s, want the path itself", got)
+	}
+	if err := os.MkdirAll(filepath.Join(prefix, "opt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../Cellar/tabstack-host/1.2.0", filepath.Join(prefix, "opt", "tabstack-host")); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(prefix, "opt", "tabstack-host", "bin", "tabstack-host")
+	if got := lastingPath(exe); got != want {
+		t.Errorf("lastingPath = %s, want %s", got, want)
+	}
+	other := filepath.Join(t.TempDir(), "tabstack-host")
+	if got := lastingPath(other); got != other {
+		t.Errorf("outside Homebrew, lastingPath = %s, want the path itself", got)
+	}
+}
+
+// Starting the helper fixes a registration that points at a binary that's
+// gone, and leaves one pointing at another copy that's still there.
+func TestRepair(t *testing.T) {
+	exe, dir := buildHelper(t)
+	gone := browser{name: "Gone", dataDir: filepath.Join(dir, "gone")}
+	other := browser{name: "Other", dataDir: filepath.Join(dir, "other")}
+	elsewhere := filepath.Join(dir, "elsewhere")
+	if err := os.WriteFile(elsewhere, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeHostManifest(gone, filepath.Join(dir, "missing"), []string{"abc"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeHostManifest(other, elsewhere, []string{"abc"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, b := range []browser{gone, other} {
+		t.Setenv("TABSTACK_TEST_BROWSER", b.name+";"+b.dataDir+";chrome")
+		h := startHelper(t, exe, dir)
+		h.send(t, state("1", 1))
+		h.expectPeers(t, "1")
+		h.in.Close()
+		h.cmd.Wait()
+	}
+	exe, _ = filepath.EvalSymlinks(exe) // the helper registers itself with links followed
+	if m, _ := readHostManifest(gone); m == nil || m.Path != exe || !slices.Equal(m.extensionIDs(), []string{"abc"}) {
+		t.Errorf("the registration pointing at a missing binary is %+v, want it at %s", m, exe)
+	}
+	if m, _ := readHostManifest(other); m == nil || m.Path != elsewhere {
+		t.Errorf("the registration pointing at another copy is %+v, want it left alone", m)
+	}
+}

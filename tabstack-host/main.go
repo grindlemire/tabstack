@@ -32,6 +32,7 @@ Usage:
   tabstack-host links <profile> [add|remove <pattern>...]
                                          the links that open in a profile
   tabstack-host uninstall                disconnect every profile and unregister the helper
+  tabstack-host version                  which tabstack-host this is
 
 A <profile> is its number from list, its name, or its folder ("Profile 1").
 
@@ -98,6 +99,9 @@ func run(args []string, stdout io.Writer) error {
 		return links(stdout, args)
 	case "uninstall":
 		return uninstall(stdout)
+	case "version", "--version":
+		fmt.Fprintln(stdout, "tabstack-host", version)
+		return nil
 	case "", "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return nil
