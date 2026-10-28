@@ -484,7 +484,6 @@ async function refreshProfiles() {
 	({ profileMark: mark = null } = await api.storage.sync.get("profileMark"));
 	showMark();
 	if (document.activeElement !== $("profile-claims")) $("profile-claims").value = status.claims.join("\n");
-	showClaims(status.claims);
 	for (const box of document.querySelectorAll("[data-shared]")) box.checked = !!status.shared[box.dataset.shared];
 	$("claims-row").hidden = !status.shared.route;
 
@@ -709,7 +708,7 @@ function filterIcons() {
 	showMark();
 }
 
-// --- pages of their own over the settings: the icon picker, and the links ---
+// --- a page of its own over the settings: the icon picker ---
 
 // A page slides in from the right, and going back slides the settings in
 // from the left. A shorter page keeps the popup's size, so it doesn't shrink
@@ -779,28 +778,20 @@ $("profile-name").addEventListener("keydown", (e) => {
 	if (e.key === "Enter") e.target.blur();
 });
 
-// The profile's links, edited on their page; the row that opens it sums them up.
-function showClaims(claims) {
-	$("claims-summary").textContent = !claims.length
-		? "None yet"
-		: claims.length === 1
-			? claims[0]
-			: `${claims[0]} and ${claims.length - 1} more`;
+// The profile's links, edited in place and saved a moment after each
+// change, as the name is, or at once when the box loses focus.
+let claimsTimer = 0;
+async function saveClaims() {
+	clearTimeout(claimsTimer);
+	claimsTimer = 0;
+	await api.storage.sync.set({ profileClaims: $("profile-claims").value.split("\n").map((c) => c.trim()).filter(Boolean) });
+	play($("claims-saved"), "flash");
 }
-
-// Leaving the page blurs the box, which saves it.
-$("profile-claims").addEventListener("change", (e) => {
-	const claims = e.target.value.split("\n").map((c) => c.trim()).filter(Boolean);
-	api.storage.sync.set({ profileClaims: claims });
-	showClaims(claims);
+$("profile-claims").addEventListener("input", () => {
+	clearTimeout(claimsTimer);
+	claimsTimer = setTimeout(saveClaims, 300);
 });
-$("claims-edit").addEventListener("click", () => openView("links-view", "profile-claims"));
-$("links-back").addEventListener("click", () => closeView("links-view", "claims-edit"));
-$("links-view").addEventListener("keydown", (e) => {
-	if (e.key !== "Escape") return;
-	e.preventDefault();
-	closeView("links-view", "claims-edit");
-});
+$("profile-claims").addEventListener("blur", () => claimsTimer && saveClaims());
 
 refresh();
 refreshProfiles();

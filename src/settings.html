@@ -322,7 +322,7 @@
 			@keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
 
 			/* the picker's page */
-			/* a page of its own over the settings: the icon picker, or the profile's links */
+			/* a page of its own over the settings: the icon picker */
 			body.picking > :not(.view) { display: none !important; }
 			.view-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 0 12px; }
 			.view-head h1 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
@@ -415,13 +415,12 @@
 			.glyphs.clear button[aria-pressed="true"] { color: var(--mark); box-shadow: inset 0 0 0 1.5px var(--mark); }
 			#mark-empty { margin: 4px 2px 0; }
 
-			/* the links page */
-			.lede { margin: 0 2px 10px; font-size: 12.5px; color: var(--muted); }
-			#profile-claims { display: block; padding: 8px 10px; background: var(--group); }
-			.patterns { margin-top: 12px; }
-			.patterns .row { min-height: 0; padding: 7px 12px; gap: 12px; font-size: 12px; }
-			.patterns code { flex: none; width: 118px; font: 11.5px/1.4 ui-monospace, Menlo, monospace; color: var(--fg); }
-			.patterns .label { color: var(--muted); }
+			/* the profile's links, edited in place: the box grows with them */
+			.claims-field { position: relative; display: block; }
+			#profile-claims { display: block; min-height: calc(3 * 1.5em + 14px); max-height: 220px; padding: 6px 8px; resize: none; field-sizing: content; }
+			.claims-field .saved { top: auto; bottom: 2px; right: 10px; }
+			.hint { font-size: 11px; color: var(--muted); }
+			.hint code { font: 10.5px ui-monospace, Menlo, monospace; color: var(--fg); }
 
 			/* setting up the profile helper, offered once and easy to dismiss */
 			.ad {
@@ -601,9 +600,13 @@
 							<span class="label">Move links to the profile they belong to<small>Each one can be sent back from its notice</small></span>
 							<input type="checkbox" data-shared="route" />
 						</label>
-						<div class="row" id="claims-row">
-							<span class="label">Links that open in this profile<small id="claims-summary"></small></span>
-							<button id="claims-edit">Edit</button>
+						<div class="row stacked" id="claims-row">
+							<span class="label">Links that open in this profile<small>Whichever profile you click them in. One site or path per line.</small></span>
+							<span class="claims-field">
+								<textarea id="profile-claims" rows="3" spellcheck="false" aria-label="Links that open in this profile" placeholder="corp.com&#10;*.corp.com&#10;github.com/acme"></textarea>
+								<span class="saved" id="claims-saved" aria-hidden="true">Saved</span>
+							</span>
+							<small class="hint"><code>*.corp.com</code> adds its subdomains, <code>github.com/acme</code> covers everything under it, and <code>*</code> matches anything.</small>
 						</div>
 					</div>
 				</section>
@@ -638,24 +641,6 @@
 			<p class="note" id="mark-empty" hidden>No icons match. Type a single letter or number to use it instead.</p>
 		</div>
 
-		<!-- the links that belong to this profile, a page of its own -->
-		<div id="links-view" class="view" hidden>
-			<div class="view-head">
-				<button id="links-back" class="back">
-					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>Profiles
-				</button>
-				<h1>Links</h1>
-				<span></span>
-			</div>
-			<p class="lede">Links to these sites open in this profile, whichever profile you click them in. One per line.</p>
-			<textarea id="profile-claims" rows="8" spellcheck="false" placeholder="*.corp.com"></textarea>
-			<div class="group patterns">
-				<div class="row"><code>corp.com</code><span class="label">that site, and www.corp.com</span></div>
-				<div class="row"><code>*.corp.com</code><span class="label">and every subdomain</span></div>
-				<div class="row"><code>github.com/acme</code><span class="label">that path, and everything under it</span></div>
-				<div class="row"><code>github.com/a*</code><span class="label">every path starting with /a</span></div>
-			</div>
-		</div>
 
 		<script src="shared.js"></script>
 		<script src="icons.js"></script>
