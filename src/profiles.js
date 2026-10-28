@@ -249,8 +249,9 @@ globalThis.TabstackProfiles = (() => {
 				reply(from, body.rid, { tab: await findTab(body.url) });
 				return;
 			case "focus": {
-				const win = await lastWindow();
-				if (win) await present(win, body.frame);
+				// picked in the popup with no window left open: it opens one
+				const win = (await lastWindow()) ?? (await api.windows.create({ focused: true }));
+				await present(win, body.frame);
 				return;
 			}
 			case "activate":
