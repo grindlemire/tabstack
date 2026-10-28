@@ -35,8 +35,10 @@ const manifest = {
 	// no _favicon service in Firefox, so no "favicon" permission
 	permissions: [...permissions.filter((p) => p !== "favicon"), ...host_permissions],
 	// working across profiles (profiles.js, and the helper's optional
-	// permissions) is Chrome only for now
-	commands: Object.fromEntries(Object.entries(commands).filter(([name]) => !name.startsWith("profile-"))),
+	// permissions) is Chrome only for now, and so is the popup's switcher
+	commands: Object.fromEntries(
+		Object.entries(commands).filter(([name]) => !name.startsWith("profile-") && name !== "_execute_action"),
+	),
 	// Manifest V2 can't run a script in the page's own world, which media.js
 	// needs to see a call start; Firefox knows calls by their address alone
 	content_scripts: rest.content_scripts.filter((script) => script.world !== "MAIN"),

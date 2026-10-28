@@ -57,6 +57,9 @@
         "mac": "MacCtrl+Command+Left"
       },
       "description": "Switch to the previous profile (with the profile helper)"
+    },
+    "_execute_action": {
+      "description": "Open the profile switcher (with the profile helper)"
     }
   },
   "content_scripts": [

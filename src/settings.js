@@ -508,6 +508,11 @@ async function refreshProfiles() {
 		$("profile-keys").textContent = "Not set";
 		$("profile-keys").classList.add("unset");
 	}
+	// Chrome's "Activate the extension", which has no key until one's set
+	const open = prettyCommand(commands.find((c) => c.name === "_execute_action")?.shortcut);
+	if (open) showKeys($("open-key"), open);
+	else $("open-key").textContent = "Not set";
+	$("open-key").classList.toggle("unset", !open);
 }
 
 $("profiles-learn").addEventListener("click", openSetup);
@@ -515,10 +520,12 @@ $("profiles-ad-hide").addEventListener("click", () => {
 	api.storage.sync.set({ profilesAdHidden: true });
 	conceal($("profiles-ad"));
 });
-$("profile-keys-change").addEventListener("click", () => {
-	api.tabs.create({ url: "chrome://extensions/shortcuts" });
-	window.close();
-});
+for (const id of ["profile-keys-change", "open-key-change"]) {
+	$(id).addEventListener("click", () => {
+		api.tabs.create({ url: "chrome://extensions/shortcuts" });
+		window.close();
+	});
+}
 $("profiles-off").addEventListener("click", async () => {
 	await api.permissions.remove(PERMISSIONS);
 	// the offer comes back, to turn them on again from here
