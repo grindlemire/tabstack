@@ -235,8 +235,12 @@ const openSetup = () => {
 };
 
 // With profile features on, they get a tab of their own beside the rest of
-// the settings. The popup opens on whichever tab was used last.
+// the settings, and with another profile to switch to, the popup opens on
+// Switch. Otherwise it opens on whichever settings tab was used last.
+const TABS = ["switch", "general", "profiles"]; // left to right
 let tabPicked = false;
+
+const currentTab = () => document.querySelector("[data-tab][aria-selected='true']")?.dataset.tab ?? "general";
 
 function lastTab() {
 	try {
@@ -255,11 +259,16 @@ let resized = 0;
 function selectTab(name, { ease = false } = {}) {
 	const panels = document.querySelector(".panels");
 	const from = panels.offsetHeight;
-	for (const tab of document.querySelectorAll("[data-tab]")) tab.setAttribute("aria-selected", tab.dataset.tab === name);
-	for (const panel of [$("general"), $("profiles")]) {
+	const tabs = [...document.querySelectorAll("[data-tab]")];
+	for (const tab of tabs) tab.setAttribute("aria-selected", tab.dataset.tab === name);
+	const shown = tabs.filter((tab) => !tab.hidden);
+	$("tabs").style.setProperty("--n", shown.length);
+	$("tabs").style.setProperty("--at", Math.max(0, shown.findIndex((tab) => tab.dataset.tab === name)));
+	for (const panel of TABS.map($)) {
 		panel.classList.toggle("inactive", panel.id !== name);
 		panel.inert = panel.id !== name;
 	}
+	if (name === "switch") focusNext();
 	clearTimeout(resized);
 	panels.classList.remove("resizing");
 	panels.style.height = "";
@@ -275,17 +284,18 @@ function selectTab(name, { ease = false } = {}) {
 	}, RESIZE_FOR);
 }
 
-const shownTab = () => ($("profiles").classList.contains("inactive") || $("profiles").hidden ? $("general") : $("profiles"));
+const shownTab = () => $(currentTab());
 
 for (const tab of document.querySelectorAll("[data-tab]")) {
 	tab.addEventListener("click", () => {
 		const name = tab.dataset.tab;
-		if (tab.getAttribute("aria-selected") === "true") return;
+		const from = currentTab();
+		if (name === from) return;
 		tabPicked = true;
 		selectTab(name, { ease: true });
 		settle();
-		// Profiles sits to the right of General
-		play($(name), name === "profiles" ? "from-right" : "from-left");
+		// in from the side it sits on
+		play($(name), TABS.indexOf(name) > TABS.indexOf(from) ? "from-right" : "from-left");
 		try {
 			localStorage.setItem("tab", name);
 		} catch {}
@@ -315,16 +325,113 @@ function showStatus(status) {
 		text = "Only this profile so far";
 		detail = "Set up tabstack in your other profiles too.";
 	} else {
-		const one = others.length === 1;
-		text = `Connected to ${one ? others[0].name : `${others.length} profiles`}`;
-		detail = one ? "" : others.map((p) => p.name).join(" · ");
+		// their names are on the Switch tab
+		text = `Connected to ${others.length === 1 ? others[0].name : `${others.length} profiles`}`;
 	}
+	showPeers(status);
 	$("profiles-dot").classList.toggle("ok", status.connected);
 	$("profiles-retry").hidden = status.connected;
 	if ($("profiles-status").textContent !== text && $("profiles-status").textContent) play($("profiles-status"), "appear");
 	$("profiles-status").textContent = text;
 	$("profiles-detail").textContent = detail;
 }
+
+// --- Switch: every connected profile, a click away ---
+//
+// In the order the shortcut steps through them, numbered so 1 to 9 pick
+// them, and laid out as evenly as their number allows.
+
+let peers = [];
+let peersShown = "";
+
+const switchable = () => peers.length > 1;
+
+// Up to four across, in as few rows as that takes, with the rows as even as
+// they'll go: five are three and two, seven four and three, nine three by three.
+const acrossFor = (n) => Math.ceil(n / Math.ceil(n / 4));
+const across = () => Number($("peers").dataset.across) || 1;
+
+// Redrawn only when something changed, or every poll would lose the
+// profile under the pointer, and the one picked with the keys.
+function showPeers(status) {
+	const next = status.connected ? status.peers : [];
+	const key = JSON.stringify(next);
+	if (key === peersShown) return;
+	const had = switchable();
+	const first = !peersShown; // the popup opening, which shouldn't ease from tab to tab
+	const focused = document.activeElement?.dataset.profile;
+	peersShown = key;
+	peers = next;
+	const n = acrossFor(peers.length);
+	$("peers").dataset.across = n;
+	$("peers").style.setProperty("--across", n);
+	$("peers").replaceChildren(...peers.map(peerTile));
+	$("peers").querySelector(`[data-profile="${CSS.escape(focused ?? "")}"]`)?.focus();
+
+	// Switch comes and goes as other profiles connect and leave
+	$("switch").hidden = document.querySelector("[data-tab='switch']").hidden = !switchable();
+	if (switchable() === had) return;
+	if (!switchable() && currentTab() === "switch") selectTab(lastTab(), { ease: !first });
+	else if (switchable() && !tabPicked) selectTab("switch", { ease: !first });
+	else selectTab(currentTab()); // the pill, for one more tab or one fewer
+}
+
+$("switch-note").textContent = `Press a number, or use the arrow keys and ${isMac ? "Return" : "Enter"}.`;
+
+// This profile is shown but does nothing; another comes forward, as the
+// shortcut brings it, or opens a window if it has none.
+function peerTile(peer, i) {
+	const tile = document.createElement("button");
+	tile.className = `peer${peer.self ? " self" : ""}${peer.windows ? "" : " closed"}`;
+	tile.dataset.profile = peer.profile;
+	const mark = peer.mark
+		? markElement(peer.mark, peer.mark.path)
+		: Object.assign(document.createElement("span"), { className: "mark empty", textContent: firstGlyph(peer.name).toUpperCase() });
+	const note = peer.self ? "This profile" : peer.windows ? "" : "No window";
+	tile.append(
+		mark,
+		Object.assign(document.createElement("span"), { className: "name", textContent: peer.name }),
+		Object.assign(document.createElement("small"), { textContent: note }),
+	);
+	if (peer.self) {
+		tile.setAttribute("aria-disabled", "true");
+		tile.title = `${peer.name}, this profile`;
+		return tile;
+	}
+	if (i < 9) tile.prepend(Object.assign(document.createElement("span"), { className: "num", textContent: i + 1 }));
+	tile.title = `${peer.windows ? "Switch to" : "Open a window in"} ${peer.name}`;
+	tile.addEventListener("click", () => switchProfile(peer));
+	return tile;
+}
+
+async function switchProfile(peer) {
+	await api.runtime.sendMessage({ type: "switchProfile", profile: peer.profile }).catch(() => {});
+	window.close();
+}
+
+// Return switches to the profile the shortcut would bring: the next one.
+function focusNext() {
+	const self = peers.findIndex((p) => p.self);
+	$("peers").children[(self + 1) % peers.length]?.focus({ preventScroll: true });
+}
+
+document.addEventListener("keydown", (e) => {
+	if (currentTab() !== "switch" || document.body.classList.contains("picking")) return;
+	if (e.metaKey || e.ctrlKey || e.altKey) return;
+	if (/^[1-9]$/.test(e.key)) {
+		const peer = peers[e.key - 1];
+		if (!peer || peer.self) return;
+		e.preventDefault();
+		switchProfile(peer);
+		return;
+	}
+	const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -across(), ArrowDown: across() }[e.key];
+	if (!step) return;
+	e.preventDefault();
+	const tiles = [...$("peers").children];
+	const at = tiles.indexOf(document.activeElement);
+	tiles[at < 0 ? 0 : Math.min(Math.max(at + step, 0), tiles.length - 1)]?.focus();
+});
 
 $("profiles-retry").addEventListener("click", async () => {
 	reconnecting = true;
@@ -365,10 +472,11 @@ async function refreshProfiles() {
 	granted = status.granted;
 	$("tabs").hidden = $("profiles").hidden = !status.granted;
 	if (!status.granted) {
+		showPeers({ connected: false });
 		selectTab("general");
 		return;
 	}
-	if (!tabPicked) selectTab(lastTab());
+	if (!tabPicked) selectTab(switchable() ? "switch" : lastTab());
 	showStatus(status);
 
 	if (document.activeElement !== $("profile-name")) $("profile-name").value = status.name;

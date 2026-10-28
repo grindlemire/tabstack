@@ -62,6 +62,9 @@
 			header h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
 			/* General and Profiles, once profile features are on */
 			header .tabs { width: 184px; margin-left: auto; }
+			header .tabs:has([data-tab="switch"]:not([hidden])) { width: 252px; }
+			/* however many tabs show, the pill is one wide and slides to the chosen one (settings.js sets --n and --at) */
+			#tabs::before { width: calc((100% - 4px) / var(--n, 2)); transform: translateX(calc(var(--at, 0) * 100%)); }
 
 			h2 {
 				margin: 0 0 6px;
@@ -240,6 +243,49 @@
 			#profiles-detail { font-size: 11.5px; color: var(--muted); }
 			#profiles-detail:empty { display: none; }
 			#profiles-retry { align-self: flex-start; flex: none; }
+
+			/* every connected profile, as even a grid as their number allows (settings.js
+			   sets --across), the larger the fewer; past four rows it scrolls */
+			#peers { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; max-height: 470px; padding: 6px; overflow-y: auto; }
+			.peer {
+				--size: 44px;
+				position: relative;
+				flex: 0 0 calc((100% - (var(--across) - 1) * 4px) / var(--across));
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				gap: 3px;
+				min-width: 0;
+				margin: 0;
+				padding: 12px 6px 9px;
+				font-size: 12.5px;
+				font-weight: 400;
+				color: var(--fg);
+				border-radius: 10px;
+			}
+			#peers[data-across="2"] .peer { --size: 64px; padding: 20px 8px 14px; font-size: 13.5px; }
+			#peers[data-across="3"] .peer { --size: 52px; padding: 16px 6px 11px; font-size: 13px; }
+			button.peer:hover { background: var(--hover); }
+			/* the one Return switches to */
+			.peer:focus-visible { outline: none; background: var(--accent-soft); }
+			.peer .mark { width: var(--size); height: var(--size); margin-bottom: 5px; font-size: calc(var(--size) * 0.5); border-radius: calc(var(--size) * 0.25); transition: transform 0.15s ease; }
+			.peer .mark svg { width: calc(var(--size) * 0.6); height: calc(var(--size) * 0.6); }
+			.peer .mark.clear { font-size: calc(var(--size) * 0.78); }
+			.peer .mark.clear svg { width: calc(var(--size) * 0.9); height: calc(var(--size) * 0.9); }
+			button.peer:not(.self):hover .mark { transform: scale(1.06); }
+			button.peer:not(.self):active .mark { transform: scale(0.94); }
+			.peer .name { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+			.peer small { max-width: 100%; min-height: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: var(--muted); }
+			/* its number, for the keys 1 to 9 */
+			.peer .num { position: absolute; top: 6px; left: 9px; font-size: 10.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+			/* the profile you're in, ringed */
+			.peer.self { cursor: default; }
+			.peer.self:hover { background: none; }
+			.peer.self .mark { box-shadow: 0 0 0 2px var(--group), 0 0 0 3.5px var(--accent); }
+			.peer.self .name { color: var(--accent); }
+			/* no window open: clicking opens one */
+			.peer.closed .mark { opacity: 0.5; }
+			.peer.closed .name { color: var(--muted); }
 			/* a moment's "Saved" by the name, once a rename is stored */
 			.name-field { position: relative; display: block; }
 			.name-field input { padding-right: 52px !important; }
@@ -422,7 +468,7 @@
 			@media (prefers-reduced-motion: reduce) {
 				body :is(header, section, .ad, .identity), .keys.recording, .keys kbd.pop, .keys.shake, .from-right, .from-left, .appear, .leaving, #mark-big > * { animation: none !important; }
 				input[type="checkbox"], input[type="checkbox"]::before, .segmented::before, .segmented button { transition: none; }
-				.glyphs button:active, .swatches button:active, #mark-open:active .mark, #mark-open:hover .mark { transform: none; }
+				.glyphs button:active, .swatches button:active, #mark-open:active .mark, #mark-open:hover .mark, button.peer:is(:hover, :active) .mark { transform: none; }
 			}
 		</style>
 	</head>
@@ -431,12 +477,20 @@
 			<img src="icons/icon-48.png" alt="" />
 			<h1>tabstack</h1>
 			<div class="segmented tabs" id="tabs" role="tablist" hidden>
+				<!-- only with another profile to switch to -->
+				<button role="tab" data-tab="switch" aria-controls="switch" hidden>Switch</button>
 				<button role="tab" data-tab="general" aria-controls="general">General</button>
 				<button role="tab" data-tab="profiles" aria-controls="profiles">Profiles</button>
 			</div>
 		</header>
 
 		<div class="panels">
+			<!-- every connected profile, once there's more than this one: a click, or its number, switches -->
+			<div id="switch" role="tabpanel" hidden>
+				<section class="group" id="peers"></section>
+				<p class="note" id="switch-note"></p>
+			</div>
+
 			<div id="general" role="tabpanel">
 				<section>
 					<h2>Shortcuts</h2>
