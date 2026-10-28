@@ -719,7 +719,7 @@ function openView(id, focus) {
 	document.body.classList.add("picking");
 	$(id).hidden = false;
 	play($(id), "from-right");
-	scrollTo(0, 0);
+	$(id).scrollTop = 0;
 	$(focus).focus();
 }
 
