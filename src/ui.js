@@ -114,7 +114,18 @@ globalThis.TabstackUI = (() => {
 .who .mark.clear { font-size: 22px; color: var(--mark); }
 .who .mark.clear svg { width: 26px; height: 26px; }
 .who .mark.plain { color: var(--muted); background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
-.who .name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+.who .name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+/* the other profiles, by their numbers, which switch to them until something's typed */
+.switch-to { flex: none; display: flex; gap: 4px; transition: opacity 0.15s ease; }
+.panel.typed .switch-to { opacity: 0.35; }
+.to { display: inline-flex; align-items: center; gap: 5px; padding: 3px 5px 3px 7px; font-size: 11.5px; font-weight: 600; color: var(--muted); background: var(--card); border-radius: 7px; font-variant-numeric: tabular-nums; }
+.to:hover { color: var(--fg); }
+.who .to .mark { width: 18px; height: 18px; font-size: 10px; border-radius: 5px; }
+.who .to .mark svg { width: 12px; height: 12px; }
+.who .to .mark.clear { font-size: 15px; }
+.who .to .mark.clear svg { width: 17px; height: 17px; }
+/* no window open: switching opens one */
+.to.closed .mark { opacity: 0.5; }
 
 .search {
 	box-sizing: border-box;
@@ -441,6 +452,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			this.closed = [];
 			this.profiles = []; // other profiles, to switch to by name
 			this.profileMarks = {}; // profile -> its mark, to show by its rows
+			this.switchTo = []; // other profiles, to switch to by number: { n, profile, name, mark, windows }
 			this.arriving = null; // rows just added, which fade in
 			this.results = [];
 			this.selected = 0;
@@ -480,6 +492,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 		setProfile(label) {
 			const name = label?.name;
 			const color = name && label.mark?.color;
+			this.switchTo = (name && label.switchTo) || [];
 			this.panel.classList.toggle("named", !!name);
 			this.panel.classList.toggle("tinted", !!color);
 			this.panel.style.removeProperty("--accent");
@@ -495,7 +508,23 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			const mark = label.mark
 				? TabstackShared.markElement(label.mark, label.mark.path)
 				: el("span", "mark plain", [...name][0].toUpperCase());
-			this.who.replaceChildren(mark, el("span", "name", name));
+			const switchTo = el("div", "switch-to");
+			switchTo.append(...this.switchTo.map((p) => this.switchChip(p)));
+			this.who.replaceChildren(mark, el("span", "name", name), switchTo);
+		}
+
+		// Another profile, by its number and mark; clicking it switches too.
+		switchChip(p) {
+			const chip = el("span", `to${p.windows ? "" : " closed"}`, String(p.n));
+			chip.title = `${p.windows ? "Switch to" : "Open a window in"} ${p.name}`;
+			chip.append(p.mark ? TabstackShared.markElement(p.mark, p.mark.path) : el("span", "mark plain", [...p.name][0].toUpperCase()));
+			chip.addEventListener("click", () => this.switchProfile(p));
+			return chip;
+		}
+
+		switchProfile(p) {
+			this.onCommit({ profileSwitch: true, profile: p.profile });
+			this.close();
 		}
 
 		open(mode, tabs, closed = []) {
@@ -578,6 +607,7 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 		// profile's call can arrive above it), or failing that, the same place.
 		filter({ keepSelection = false } = {}) {
 			const query = this.input.value.trim();
+			this.panel.classList.toggle("typed", !!this.input.value);
 			const kept = keepSelection ? this.results[this.selected]?.item : null;
 			// the tab you're on is never a result; closed tabs and profiles show
 			// once you type, and a profile whose name matches comes first
@@ -647,7 +677,11 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 			const closeTab = cycling
 				? k === "Backspace" || k === "Delete" || e.code === "KeyX"
 				: (e.metaKey || e.ctrlKey) && (k === "Backspace" || k === "Delete");
-			if (k === "Escape") this.close();
+			// before anything's typed, another profile's number switches to it
+			const to =
+				!cycling && !this.input.value && !e.metaKey && !e.ctrlKey && !e.altKey && this.switchTo.find((p) => String(p.n) === k);
+			if (to) this.switchProfile(to);
+			else if (k === "Escape") this.close();
 			else if (k === "Enter") this.commit();
 			else if (closeTab) this.closeSelected();
 			else if (back || prev || (cycling && k === "ArrowLeft")) this.move(-1);

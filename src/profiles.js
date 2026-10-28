@@ -153,12 +153,24 @@ globalThis.TabstackProfiles = (() => {
 	// search has it the moment it opens. A profile with no name yet goes by
 	// its place in the list, once the helper has sent the list. A mark's icon
 	// goes with it, so pages needn't load every icon to show one.
+	//
+	// The other profiles go with it, numbered as the popup's Switch tab
+	// numbers them, so search can switch to one by its number the moment
+	// it opens, without waiting on their tabs.
 	let label;
 	function publishLabel() {
 		const name = local.name || (connected ? nameOf(profile) : "");
 		const path = local.mark?.icon && globalThis.TabstackIcons?.[local.mark.icon];
 		const mark = local.mark && { ...local.mark, ...(path && { path }) };
-		const next = enabled && (name || mark) ? { name, mark } : null;
+		const switchTo =
+			connected && shared.values.searchProfiles
+				? peers.flatMap((p, i) =>
+						p.profile === profile || i >= 9
+							? []
+							: [{ n: i + 1, profile: p.profile, name: nameOf(p.profile), mark: markOf(p.profile), windows: p.windows }],
+					)
+				: [];
+		const next = enabled && (name || mark) ? { name, mark, ...(switchTo.length && { switchTo }) } : null;
 		if (JSON.stringify(next) === JSON.stringify(label)) return;
 		label = next;
 		if (next) api.storage.local.set({ profileLabel: next });
@@ -755,6 +767,7 @@ globalThis.TabstackProfiles = (() => {
 	async function setShared(values) {
 		shared = { values: { ...shared.values, ...values }, at: Date.now() };
 		await api.storage.local.set({ profileShared: shared });
+		publishLabel(); // with search's numbers, or without
 		sendState();
 	}
 
