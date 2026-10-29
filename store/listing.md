@@ -14,7 +14,9 @@ in `src/manifest.json` rather than here.
 - **Privacy policy:** https://tabstack.alethi.dev/privacy
 - **Support email:** support@alethi.dev
 - **Support URL:** https://github.com/grindlemire/tabstack/issues
-- **Images:** `store/screenshot-1-cycle.png` through `screenshot-4-settings.png` (1280x800)
+- **Images** (1280x800, in this order):
+  - Chrome: `screenshot-0-title.png`, `screenshot-1-cycle.png`, then `screenshot-chrome-2-search.png`, `screenshot-chrome-3-profiles.png` and `screenshot-chrome-4-settings.png`, which show working across profiles
+  - Firefox: `screenshot-0-title.png`, `screenshot-1-cycle.png`, `screenshot-2-search.png`, `screenshot-3-dark.png` and `screenshot-4-settings.png`, without profiles, which Firefox doesn't have
 
 ## Chrome Web Store
 
@@ -143,7 +145,7 @@ Working across Chrome profiles is optional and needs a separate helper app, the 
 
 ## addons.mozilla.org
 
-**Add-on URL:** `tabstack-switcher` (the `tabstack` address is taken)
+**Add-on URL:** `tabstack-recent-tab-switcher` (the `tabstack` address is taken)
 **Category:** Tabs
 **License:** MIT
 **Platforms:** Firefox only, not Firefox for Android
