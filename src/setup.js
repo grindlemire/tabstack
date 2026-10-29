@@ -130,6 +130,8 @@ function show(status) {
 async function showKeys() {
 	const commands = await api.commands.getAll();
 	const keys = ["profile-next", "profile-prev"].map((n) => commands.find((c) => c.name === n)?.shortcut).filter(Boolean);
+	// setup.html says ⌃⌘→ and ⌃⌘←, the keys on a Mac
+	if (keys.length) $("shortcut-text").textContent = keys.join(" and ");
 	if (!keys.length) {
 		$("keys").textContent = "No shortcut set";
 		return;

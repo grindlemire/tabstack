@@ -78,7 +78,7 @@ Chrome keeps each profile's extensions apart, so on its own tabstack only sees t
 - Opening a page that's already open in another profile offers to go there instead.
 - Each profile gets an icon and a color. It replaces tabstack's toolbar icon, sits over search, and marks that profile's tabs and notices in the others.
 
-It works in Chrome, Brave, Edge, Chromium and Vivaldi, on macOS and Linux. On Linux, set the profile shortcuts at `chrome://extensions/shortcuts`. Nothing changes until you set it up:
+It works in Chrome, Brave, Edge, Chromium and Vivaldi, on macOS and Linux. On Linux the profile shortcuts are Alt+Shift+Right and Alt+Shift+Left. Nothing changes until you set it up:
 
 ```sh
 brew install grindlemire/tap/tabstack

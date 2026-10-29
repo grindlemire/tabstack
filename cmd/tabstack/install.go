@@ -462,7 +462,11 @@ func connectAll(w io.Writer, home string, targets []target) error {
 		}
 		return errors.New("not every profile connected")
 	}
-	fmt.Fprintln(w, "\nAll set. Switch profiles with ⌃⌘→ and ⌃⌘←, and find the rest under Profiles in tabstack's toolbar popup.")
+	keys := "⌃⌘→ and ⌃⌘←"
+	if runtime.GOOS != "darwin" {
+		keys = "Alt+Shift+→ and Alt+Shift+←"
+	}
+	fmt.Fprintf(w, "\nAll set. Switch profiles with %s, and find the rest under Profiles in tabstack's toolbar popup.\n", keys)
 	return nil
 }
 
