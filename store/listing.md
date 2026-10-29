@@ -184,12 +184,31 @@ tabstack has no servers of its own and never sends your tabs, history or setting
 Firefox doesn't let extensions draw on its own pages, such as about: pages and this site. On those pages Cmd+J switches straight to your previous tab and the switcher opens there instead.
 ```
 
-### Notes for reviewers
+### Release notes
+
+The "Release notes" field when uploading a new version. Each version's covers
+what changed since the one the store last had.
+
+**1.1.1** (since 1.0.0):
 
 ```
-The source is plain JavaScript with no bundler or minifier. The Firefox package is built by build.mjs, which copies src/ and rewrites manifest.json for Firefox (Manifest V2, an event-page background, and the gecko id). It doesn't transform any code. Source: https://github.com/grindlemire/tabstack
+- Search puts a tab that's on a call first, marked with a red microphone, then tabs playing sound. Type "call" or "sound" to find them. Firefox knows a call by its address: Google Meet, Zoom, Slack huddles and Jitsi Meet.
+- Typing in search no longer sets off a site's own single-key shortcuts, like those on GitHub or YouTube.
+- Search highlights the tab under the pointer, and its scrollbar matches the light or dark theme.
+- Recently closed tabs no longer show up in search unless you turn them on in settings.
+```
 
-To try it, open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the previous tab. Hold Cmd and press J repeatedly to cycle through recent tabs, and press Cmd+Shift+Space to search.
+### Notes for reviewers
+
+The first paragraph is about this version, so rewrite it for each upload; the
+rest stays.
+
+```
+This update asks for no new permissions; the manifest's permissions are the same as 1.0.0's. What changed: search now lists tabs on a call or playing sound first. Firefox recognizes a call only by the tab's address (Google Meet, Zoom, Slack huddles, Jitsi Meet), so nothing reads the microphone, camera or page content. Typing in search also no longer reaches the page's own key handlers.
+
+The source is plain JavaScript with no bundler or minifier. The Firefox package is built by build.mjs, which copies src/ and rewrites manifest.json for Firefox (Manifest V2, an event-page background, and the gecko id). It leaves out profiles.js, setup.html, setup.js and media.js, which only work in Chrome. It doesn't transform any code. Source: https://github.com/grindlemire/tabstack
+
+To try it, open a few tabs, then tap Cmd+J (Ctrl+J on Windows and Linux) to go back to the previous tab. Hold Cmd and press J repeatedly to cycle through recent tabs, and press Cmd+Shift+Space to search. To see a call listed first, open https://meet.jit.si/any-name in a tab, then open search from another tab.
 
 The extension uses Manifest V2 because under Manifest V3 Firefox only allows tabs.captureVisibleTab on a tab the extension was just invoked on (activeTab), even with host permissions granted. The thumbnails need captures of whichever tab the user is on, and captureTab for tabs that loaded in the background at startup.
 ```
