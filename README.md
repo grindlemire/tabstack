@@ -8,7 +8,7 @@ tabstack orders your tabs by when you last used them, so Cmd+J always takes you 
   <img src="store/screenshot-1-cycle.png" width="720" alt="The switcher over a Wikipedia page, showing thumbnail cards of five recent tabs with the second one selected">
 </p>
 
-More at [tabstack.alethi.dev](https://tabstack.alethi.dev).
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tabstack-recent-tab-switc/midaldjfdmomndckncoafagdheghjdkl) (Chrome, Brave, Edge and other Chromium browsers) or [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/tabstack-recent-tab-switcher/) (Firefox and Zen). More at [tabstack.alethi.dev](https://tabstack.alethi.dev).
 
 ## Shortcuts
 

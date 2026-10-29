@@ -278,8 +278,9 @@
 			#peers[data-across="2"] .peer { --size: 64px; padding: 20px 8px 14px; font-size: 13.5px; }
 			#peers[data-across="3"] .peer { --size: 52px; padding: 16px 6px 11px; font-size: 13px; }
 			button.peer:hover { background: var(--hover); }
-			/* the one Return switches to */
-			.peer:focus-visible { outline: none; background: var(--accent-soft); }
+			/* the one picked, which Return switches to: the only highlight, from
+			   the keys or a click, starting on the profile you're in */
+			.peer:focus, .peer:focus-visible { outline: none; background: var(--accent-soft); }
 			.peer .mark { width: var(--size); height: var(--size); margin-bottom: 5px; font-size: calc(var(--size) * 0.5); border-radius: calc(var(--size) * 0.25); transition: transform 0.15s ease; }
 			.peer .mark svg { width: calc(var(--size) * 0.6); height: calc(var(--size) * 0.6); }
 			.peer .mark.clear { font-size: calc(var(--size) * 0.78); }
@@ -290,11 +291,9 @@
 			.peer small { max-width: 100%; min-height: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: var(--muted); }
 			/* its number, for the keys 1 to 9 */
 			.peer .num { position: absolute; top: 6px; left: 9px; font-size: 10.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
-			/* the profile you're in, ringed */
+			/* the profile you're in, which there's no switching to */
 			.peer.self { cursor: default; }
-			.peer.self:hover { background: none; }
-			.peer.self .mark { box-shadow: 0 0 0 2px var(--group), 0 0 0 3.5px var(--accent); }
-			.peer.self .name { color: var(--accent); }
+			.peer.self:not(:focus):hover { background: none; }
 			/* no window open: clicking opens one */
 			.peer.closed .mark { opacity: 0.5; }
 			.peer.closed .name { color: var(--muted); }

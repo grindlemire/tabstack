@@ -268,7 +268,7 @@ function selectTab(name, { ease = false } = {}) {
 		panel.classList.toggle("inactive", panel.id !== name);
 		panel.inert = panel.id !== name;
 	}
-	if (name === "switch") focusNext();
+	if (name === "switch") focusSelf();
 	clearTimeout(resized);
 	panels.classList.remove("resizing");
 	panels.style.height = "";
@@ -409,10 +409,9 @@ async function switchProfile(peer) {
 	window.close();
 }
 
-// Return switches to the profile the shortcut would bring: the next one.
-function focusNext() {
-	const self = peers.findIndex((p) => p.self);
-	$("peers").children[(self + 1) % peers.length]?.focus({ preventScroll: true });
+// The pick starts on the profile you're in, for the arrow keys to move from.
+function focusSelf() {
+	$("peers").querySelector(".self")?.focus({ preventScroll: true });
 }
 
 document.addEventListener("keydown", (e) => {
