@@ -166,7 +166,7 @@ export interface Timing {
 export type RelayedMessage = { type: "search" } | { type: "modUp"; key: string };
 
 // "page" ones come from content scripts or tabstack's own pages.
-export type PageToBackground =
+type PageToBackground =
 	| { type: "tabs"; search?: boolean }
 	| { type: "tabsElsewhere" }
 	| { type: "activate"; tabId: number; windowId: number; profile?: string }
@@ -180,7 +180,7 @@ export type PageToBackground =
 	| { type: "relay"; message: RelayedMessage };
 
 // "extension" ones only from tabstack's own pages.
-export type ExtensionToBackground =
+type ExtensionToBackground =
 	| { type: "search"; currentId?: number }
 	| { type: "profiles" }
 	| { type: "profilesShared"; values: Partial<SharedSettings> }
@@ -191,7 +191,7 @@ export type Message = PageToBackground | ExtensionToBackground;
 export type MessageType = Message["type"];
 export type MessageOf<T extends MessageType> = Extract<Message, { type: T }>;
 
-export type Ok = { ok: true };
+type Ok = { ok: true };
 export type Failed = { ok: false };
 export type Done = { type: "done" };
 
@@ -248,11 +248,11 @@ export type PageMessage =
 	// a notice from the profiles module; mark is the other profile's
 	| { type: "toast"; id: string; text: string; action: string; mark: Mark | null };
 
-// To the switcher page, over its port ("switcher"). start's fields are
+// To the switcher page, over its port ("switcher"). start's tabs are
 // missing when the page wasn't opened by the shortcut.
-export type StartMessage = { type: "start"; tabs?: TabItem[]; modifier?: Modifier; switchCode?: string | null };
-export type TabsReply = { type: "tabs" } & SearchTabs;
-export type MoreTabs = { type: "moreTabs" } & Elsewhere;
+export type StartMessage = { type: "start"; tabs?: TabItem[] };
+type TabsReply = { type: "tabs" } & SearchTabs;
+type MoreTabs = { type: "moreTabs" } & Elsewhere;
 export type PortReply = StartMessage | TabsReply | MoreTabs | Done;
 
 // --- in the page ---

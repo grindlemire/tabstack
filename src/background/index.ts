@@ -1,12 +1,13 @@
-// Keeps the most-recently-used tab stack, captures thumbnails and favicons, and
-// routes the switch shortcut to the page overlay (content/index.ts). On pages
-// extensions can't touch, it jumps to the previous tab and continues there.
-// Searching from those pages opens the switcher in the toolbar popup.
+// Keeps the most-recently-used tab stack and routes the switch shortcut to
+// the page overlay (content/index.ts). On pages extensions can't touch, it
+// jumps to the previous tab and continues there. Searching from those pages
+// opens the switcher in the toolbar popup. Thumbnails and favicons are
+// thumbnails.ts's.
 
 // Working across profiles (profiles.ts) is Chrome only for now; the Firefox
 // build leaves it out (FIREFOX_BUILD).
 
-import { api, isMac } from "../shared/api";
+import { api, isFirefox, isMac } from "../shared/api";
 import { ICONS as MARK_ICONS } from "../shared/icons";
 import { inkOn } from "../shared/marks";
 import type {
@@ -18,7 +19,6 @@ import type {
 	Message,
 	MessageOf,
 	MessageType,
-	Modifier,
 	PageMessage,
 	PortReply,
 	Results,
@@ -29,26 +29,19 @@ import type {
 } from "../shared/messages";
 import { DEFAULTS, loadSettings, onSettingsChange, type Settings, watchLabel } from "../shared/settings";
 import { createProfiles } from "./profiles";
+import { parseShortcut } from "./shortcut";
+import { committed, type Jump, order, overlayClosed, putFirst, toFront } from "./stack";
+import { createThumbnails, type ThumbStore } from "./thumbnails";
+import { overlayCanRun } from "./urls";
 
-const profiles = FIREFOX_BUILD ? null : createProfiles(); // only with the profile helper
-const isFirefox = /Firefox\//.test(navigator.userAgent);
+const profiles = FIREFOX_BUILD ? null : createProfiles(); // null in the Firefox build
 
-const THUMB_WIDTH = 400;
-const THUMB_LIMIT = 50; // keep thumbnails for this many recent tabs
 const CYCLE_SENT = 5; // tabs a cycle can reach, matching the cards in ui/index.ts
 const PRESS_GAP = 300; // ms between presses that count as one held cycle, between browser pages
-const SAVED_LIMIT = 100; // thumbnails kept across restarts, by page URL
-const CAPTURE_DELAY = 400; // let the page paint after activation
-const CAPTURE_GAP = 600; // Chrome allows ~2 captures per second
-const REFRESH_ALARM = "refresh-thumbnail";
 const CLOSED_SENT = 10;
 
 const ICONS = { 16: "icons/icon-16.png", 32: "icons/icon-32.png" };
 const WARNING_ICONS = { 16: "icons/warning-16.png", 32: "icons/warning-32.png" };
-
-// Pages where content scripts don't run, so the overlay can't be drawn.
-const RESTRICTED =
-	/^(chrome|chrome-extension|chrome-search|chrome-untrusted|devtools|edge|about|moz-extension|view-source|data|file):|^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|addons\.mozilla\.org)\//;
 
 // Pages that are a call by their address alone. A call is usually known by
 // its page turning on the microphone or camera (content/media.ts), but not in a tab
@@ -56,35 +49,28 @@ const RESTRICTED =
 const CALL_PAGES =
 	/^https:\/\/(meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}\b|([\w-]+\.)?zoom\.us\/wc\/|app\.slack\.com\/huddle\/|meet\.jit\.si\/[^/?#]+)/;
 
-// What a cycle sends the page, and what the switcher starts with.
+// What a cycle sends the page.
 type CycleMessage = Extract<PageMessage, { type: "cycle" }>;
-type StartData = Omit<StartMessage, "type">;
 
 // What's kept in storage.session.
-interface SessionStore {
+interface SessionStore extends ThumbStore {
 	stack?: number[];
-	icons?: Record<string, string>;
 	inCall?: Record<string, number[]>;
-	[thumb: `thumb:${number}`]: string;
 }
 
 let stack: number[] = []; // tab ids, most recent first
 const inCall = new Map<number, Set<number>>(); // tab id -> ids of its frames using the microphone or camera
-const thumbs = new Map<number, string>(); // tab id -> data URL
-const savedThumbs = new Map<string, string>(); // page address (savedKey) -> data URL, from earlier sessions
-let savedIndex: string[] = []; // page addresses with a saved thumbnail, most recent first
-const icons = new Map<string, string>(); // icon key -> data URL, or "" when there's none
-const iconsLoading = new Set<string>();
-const overlayOpen = new Set<number | undefined>(); // tab ids showing the switcher
-const captureTimers = new Map<number, ReturnType<typeof setTimeout>>(); // window id -> timeout
-let lastCaptureAt = 0;
+const overlayOpen = new Set<number>(); // tab ids showing the switcher
 let switcherPort: chrome.runtime.Port | null = null;
-let blind: { tabs: TabItem[]; index: number; from: number; at: number } | null = null; // { tabs, index, from, at } while quick presses step through browser pages
-let pendingSwitcher: StartData | Promise<StartData> | null = null; // what the switcher that's opening shows: a value or a promise
-let jump: { from: number; via: number; to?: number } | null = null; // { from, via, to } while a cycle continues on the tab we jumped to
+let blind: { tabs: TabItem[]; index: number; from: number; at: number } | null = null; // while quick presses step through browser pages
+let pendingSwitcher: Promise<TabItem[]> | null = null; // the tabs the switcher that's opening starts with
+let jump: Jump | null = null; // while a cycle continues on the tab we jumped to
 let commandQueue = Promise.resolve();
 let settings: Settings = DEFAULTS;
+let label: Label | null = null; // this profile's { name, mark }, for the toolbar icon
+let lastIconUpdate = 0;
 
+const thumbnails = createThumbnails({ recent: () => stack, showing: (tabId) => overlayOpen.has(tabId) });
 const ready = load();
 
 async function load() {
@@ -102,22 +88,10 @@ async function load() {
 		// first run this session: seed from the browser's own record
 		stack = [...tabs].sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0)).map((t) => t.id!);
 	}
-
-	for (const [key, value] of Object.entries(saved)) {
-		const id = Number(key.slice(6));
-		if (key.startsWith("thumb:") && ids.has(id)) thumbs.set(id, value as string);
-	}
-	for (const [key, value] of Object.entries(saved.icons ?? {})) icons.set(key, value);
 	for (const [id, frames] of Object.entries(saved.inCall ?? {})) {
 		if (ids.has(Number(id))) inCall.set(Number(id), new Set(frames));
 	}
-
-	// Chrome can only capture the tab on screen, so tabs restored at startup
-	// show the picture from their last visit until they're seen again.
-	savedIndex = (await savedStore("readonly", (store) => store.get(SAVED_INDEX)).catch(() => null))?.result ?? [];
-	await loadSaved(tabs.filter((t) => !thumbs.has(t.id!)).map((t) => t.url));
-	if (api.tabs.captureTab) captureInBackground(tabs);
-	for (const tab of tabs) iconFor(tab); // fetch any that are missing
+	await thumbnails.load(saved, tabs);
 }
 
 onSettingsChange((s) => (settings = s));
@@ -127,22 +101,14 @@ function save() {
 }
 
 function touch(tabId: number) {
-	stack = [tabId, ...stack.filter((id) => id !== tabId)];
-	if (jump?.to === tabId) {
-		// cycled on past the tab we jumped through, so the page the cycle
-		// started on is "previous", not the one we passed
-		stack = [tabId, jump.from, ...stack.filter((id) => id !== tabId && id !== jump!.from)];
-		jump = null;
-	}
+	({ stack, jump } = toFront(stack, tabId, jump));
 	save();
 }
 
 function forget(tabId: number) {
 	stack = stack.filter((id) => id !== tabId);
-	thumbs.delete(tabId);
 	overlayOpen.delete(tabId);
 	if (inCall.delete(tabId)) saveCalls();
-	api.storage.session.remove(`thumb:${tabId}`);
 	save();
 }
 
@@ -167,11 +133,12 @@ const isCall = (tab: chrome.tabs.Tab) => inCall.has(tab.id!) || CALL_PAGES.test(
 
 // --- tab tracking ---
 
-api.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+api.tabs.onActivated.addListener(async ({ tabId }) => {
 	await ready;
 	touch(tabId);
-	scheduleCapture(windowId, tabId);
-	if (Date.now() - lastShortcutCheck > 10_000) checkShortcut();
+	// Chrome has no commands.onChanged, so a shortcut set or cleared at
+	// chrome://extensions/shortcuts reaches the toolbar icon on a tab switch.
+	if (Date.now() - lastIconUpdate > 10_000) updateToolbarIcon();
 });
 
 api.windows.onFocusChanged.addListener(async (windowId) => {
@@ -186,32 +153,33 @@ api.tabs.onRemoved.addListener(async (tabId) => {
 	forget(tabId);
 });
 
-// Chrome swaps in prerendered pages under a new tab id.
+// Chrome swaps in prerendered pages under a new tab id. The new page takes
+// the old one's place in the stack; its overlay and any call went with it.
 api.tabs.onReplaced?.addListener(async (added, removed) => {
 	await ready;
 	stack = stack.map((id) => (id === removed ? added : id));
-	thumbs.delete(removed);
+	overlayOpen.delete(removed);
+	if (inCall.delete(removed)) saveCalls();
 	save();
 });
 
-api.tabs.onUpdated.addListener(async (tabId, change, tab) => {
-	if (!change.status && !change.favIconUrl && !change.url) return;
-	// a new favicon URL gets a new key, so iconFor() fetches it
-	await ready;
-	if (change.url) loadSaved([change.url]);
-	if (change.status === "complete" && tab.active) scheduleCapture(tab.windowId, tabId);
-	iconFor(tab);
+// A new document has no overlay, whether or not the old one said it closed.
+api.tabs.onUpdated.addListener((tabId, change) => {
+	if (change.status === "loading") overlayOpen.delete(tabId);
 });
 
-api.runtime.onInstalled.addListener(async () => {
-	checkShortcut();
+api.runtime.onInstalled.addListener(async ({ reason }) => {
+	updateToolbarIcon();
 	// Before 1.2, saved thumbnails were kept in storage.local, where content
 	// scripts can read them. They're taken again as tabs are seen.
 	api.storage.local.get(null).then((all) => {
 		const old = Object.keys(all).filter((k) => k.startsWith("saved:") || k === "savedIndex");
 		if (old.length) api.storage.local.remove(old);
 	});
-	// Chrome doesn't inject content scripts into tabs that were already open.
+	// Chrome doesn't inject content scripts into tabs that were already open
+	// when tabstack is installed or updated; Firefox does. After a browser
+	// update the tabs load again, scripts and all.
+	if (FIREFOX_BUILD || (reason !== "install" && reason !== "update")) return;
 	const tabs = await api.tabs.query({ url: ["http://*/*", "https://*/*"] });
 	for (const tab of tabs) {
 		const inject = (allFrames: boolean, files: string[]) =>
@@ -220,252 +188,6 @@ api.runtime.onInstalled.addListener(async () => {
 		inject(true, ["relay.js"]);
 	}
 });
-
-// --- thumbnails ---
-
-function scheduleCapture(windowId: number, tabId: number, delay = CAPTURE_DELAY) {
-	clearTimeout(captureTimers.get(windowId));
-	captureTimers.set(
-		windowId,
-		setTimeout(() => capture(windowId, tabId), delay),
-	);
-}
-
-async function capture(windowId: number, tabId: number) {
-	captureTimers.delete(windowId);
-
-	const wait = lastCaptureAt + CAPTURE_GAP - Date.now();
-	if (wait > 0) return scheduleCapture(windowId, tabId, wait);
-
-	let tab: chrome.tabs.Tab;
-	try {
-		tab = await api.tabs.get(tabId);
-	} catch {
-		return;
-	}
-	// a loading tab gets captured again by onUpdated when it completes
-	if (!tab.active || tab.windowId !== windowId || tab.status !== "complete") return;
-	captureNow(tab);
-}
-
-// Starts the capture before awaiting anything, so a switch that follows right
-// behind (a quick tap of the shortcut) can't land in the picture.
-async function captureNow(tab: chrome.tabs.Tab) {
-	if (overlayOpen.has(tab.id) || RESTRICTED.test(tab.url ?? "")) return;
-	lastCaptureAt = Date.now();
-	try {
-		const shot = await api.tabs.captureVisibleTab(tab.windowId, captureOptions(tab));
-		await keepThumb(tab, await shrink(shot));
-	} catch (e) {
-		// minimized window, or the tab moved on; hitting the rate limit is routine
-		if (!/MAX_CAPTURE/.test((e as Error).message))
-			console.warn("[tabstack] capture failed:", tab.url, (e as Error).message ?? e);
-	}
-}
-
-// Firefox can capture at a given scale, which saves encoding a full Retina
-// screenshot only to shrink it; Chrome always captures at full size.
-function captureOptions(tab: chrome.tabs.Tab) {
-	const options: chrome.extensionTypes.ImageDetails = { format: "jpeg", quality: 70 };
-	if (isFirefox && tab.width) options.scale = Math.min(1, THUMB_WIDTH / tab.width);
-	return options;
-}
-
-async function shrink(dataUrl: string) {
-	const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
-	const height = Math.round((bitmap.height * THUMB_WIDTH) / bitmap.width);
-	const canvas = new OffscreenCanvas(THUMB_WIDTH, height);
-	canvas.getContext("2d")!.drawImage(bitmap, 0, 0, THUMB_WIDTH, height);
-	bitmap.close();
-	return blobToDataUrl(await canvas.convertToBlob({ type: "image/webp", quality: 0.75 }));
-}
-
-async function blobToDataUrl(blob: Blob) {
-	const bytes = new Uint8Array(await blob.arrayBuffer());
-	let binary = "";
-	for (let i = 0; i < bytes.length; i += 0x8000) {
-		binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-	}
-	return `data:${blob.type};base64,${btoa(binary)}`;
-}
-
-async function keepThumb(tab: chrome.tabs.Tab, thumb: string) {
-	await ready;
-	thumbs.set(tab.id!, thumb);
-	api.storage.session.set({ [`thumb:${tab.id}`]: thumb });
-	trimThumbs();
-	if (!tab.incognito) saveByUrl(tab.url, thumb);
-}
-
-// Firefox can capture tabs that aren't on screen, as long as they're loaded,
-// so at startup it fills in what the saved thumbnails don't cover.
-async function captureInBackground(tabs: chrome.tabs.Tab[]) {
-	const missing = tabs.filter((t) => !t.active && !t.discarded && t.status === "complete" && !RESTRICTED.test(t.url!));
-	for (const tab of missing.filter((t) => !thumbs.has(t.id!)).slice(0, THUMB_LIMIT)) {
-		try {
-			await keepThumb(tab, await shrink(await api.tabs.captureTab!(tab.id, captureOptions(tab))));
-		} catch {}
-	}
-}
-
-// Thumbnails kept across restarts are pictures of where you've been, so they
-// go in the background's own IndexedDB, which content scripts can't reach, as
-// they can storage.local. They're kept by the page's address without its
-// query or fragment, which can carry search terms and tokens.
-const SAVED_INDEX = 0; // savedIndex's key: a number, so no address can be it
-const savedKey = (url: string | undefined) => url?.split(/[?#]/, 1)[0] || null;
-
-let savedDb: Promise<IDBDatabase> | null = null;
-function savedStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => T): Promise<T> {
-	savedDb ??= new Promise<IDBDatabase>((resolve, reject) => {
-		const req = indexedDB.open("tabstack", 1);
-		req.onupgradeneeded = () => req.result.createObjectStore("saved");
-		req.onsuccess = () => resolve(req.result);
-		req.onerror = () => reject(req.error);
-	}).catch((e) => {
-		savedDb = null; // try again next time
-		throw e;
-	});
-	// settles once the transaction is done, with what fn returned (its requests)
-	return savedDb.then(
-		(db) =>
-			new Promise<T>((resolve, reject) => {
-				const tx = db.transaction("saved", mode);
-				const out = fn(tx.objectStore("saved"));
-				tx.oncomplete = () => resolve(out);
-				tx.onerror = tx.onabort = () => reject(tx.error);
-			}),
-	);
-}
-
-async function loadSaved(urls: (string | undefined)[]) {
-	const keys = urls.map(savedKey).filter((k): k is string => !!k && !savedThumbs.has(k) && savedIndex.includes(k));
-	if (!keys.length) return;
-	const found = await savedStore("readonly", (store) => keys.map((k) => [k, store.get(k)] as const)).catch(() => []);
-	for (const [key, req] of found) if (req.result) savedThumbs.set(key, req.result);
-}
-
-function saveByUrl(url: string | undefined, thumb: string) {
-	const key = savedKey(url);
-	if (!key) return;
-	savedThumbs.set(key, thumb);
-	savedIndex = [key, ...savedIndex.filter((k) => k !== key)];
-	const dropped = savedIndex.splice(SAVED_LIMIT);
-	savedStore("readwrite", (store) => {
-		store.put(thumb, key);
-		store.put(savedIndex, SAVED_INDEX);
-		for (const k of dropped) store.delete(k);
-	}).catch(() => {});
-	for (const k of dropped) savedThumbs.delete(k);
-}
-
-function trimThumbs() {
-	const keep = new Set(stack.slice(0, THUMB_LIMIT));
-	for (const id of thumbs.keys()) {
-		if (!keep.has(id)) {
-			thumbs.delete(id);
-			api.storage.session.remove(`thumb:${id}`);
-		}
-	}
-}
-
-// Refresh the thumbnail of the tab you're looking at, so pages that change
-// (chat, mail, dashboards) don't show how they looked when you arrived. The
-// timer only runs while you're at the computer, so an idle browser isn't
-// woken every 30 seconds.
-api.idle.setDetectionInterval(60);
-api.idle.onStateChanged.addListener((state) => {
-	if (state === "active") api.alarms.create(REFRESH_ALARM, { periodInMinutes: 0.5 });
-	else api.alarms.clear(REFRESH_ALARM);
-});
-api.alarms.get(REFRESH_ALARM).then((alarm) => {
-	if (!alarm) api.alarms.create(REFRESH_ALARM, { periodInMinutes: 0.5 });
-});
-
-api.alarms.onAlarm.addListener(async ({ name }) => {
-	if (name !== REFRESH_ALARM) return;
-	if ((await api.idle.queryState(60)) !== "active") {
-		api.alarms.clear(REFRESH_ALARM); // in case the idle event was missed
-		return;
-	}
-	const win = await api.windows.getLastFocused();
-	if (!win.focused) return;
-	const [tab] = await api.tabs.query({ active: true, windowId: win.id });
-	if (tab) capture(win.id!, tab.id!);
-});
-
-// --- favicons ---
-//
-// Sent as 32px PNG data URLs and drawn on canvas, so the page's CSP can't
-// block them. The page's own icon is fetched and redrawn (many are ICO or SVG).
-// Chrome's _favicon service covers chrome:// pages, and whatever a service
-// worker can't decode (SVG), but lags behind a page that just loaded.
-
-const fetchable = (url: string | undefined): url is string => /^(https?|data):/.test(url ?? "");
-
-function iconKey(tab: chrome.tabs.Tab) {
-	if (fetchable(tab.favIconUrl)) return tab.favIconUrl;
-	return isFirefox ? null : tab.url || null;
-}
-
-function iconFor(tab: chrome.tabs.Tab) {
-	const key = iconKey(tab);
-	if (!key) return null;
-	if (!icons.has(key)) loadIcon(key, tab);
-	return icons.get(key) || null;
-}
-
-async function loadIcon(key: string, tab: chrome.tabs.Tab) {
-	if (iconsLoading.has(key)) return;
-	iconsLoading.add(key);
-	try {
-		icons.set(key, await fetchIcon(tab));
-	} catch {
-		icons.set(key, "");
-	} finally {
-		iconsLoading.delete(key);
-		saveIcons();
-	}
-}
-
-async function fetchIcon(tab: chrome.tabs.Tab) {
-	if (fetchable(tab.favIconUrl)) {
-		try {
-			return await redraw(await (await fetch(tab.favIconUrl)).blob());
-		} catch {
-			if (isFirefox) return "";
-		}
-	}
-	const url = `${api.runtime.getURL("/_favicon/")}?pageUrl=${encodeURIComponent(tab.url!)}&size=32`;
-	return redraw(await (await fetch(url)).blob());
-}
-
-async function redraw(blob: Blob) {
-	let image: HTMLImageElement | ImageBitmap;
-	if (typeof Image === "function") {
-		// Firefox's background page has a DOM, which also decodes SVG
-		image = new Image();
-		image.src = URL.createObjectURL(blob);
-		await image.decode().finally(() => URL.revokeObjectURL((image as HTMLImageElement).src));
-	} else {
-		image = await createImageBitmap(blob);
-	}
-	const canvas = new OffscreenCanvas(32, 32);
-	canvas.getContext("2d")!.drawImage(image, 0, 0, 32, 32);
-	return blobToDataUrl(await canvas.convertToBlob({ type: "image/png" }));
-}
-
-let iconSaveTimer: ReturnType<typeof setTimeout> | 0 = 0;
-function saveIcons() {
-	clearTimeout(iconSaveTimer);
-	iconSaveTimer = setTimeout(async () => {
-		// keep only icons for tabs that are still open
-		const tabs = await api.tabs.query({});
-		const keep = new Set(tabs.map(iconKey));
-		for (const key of icons.keys()) if (!keep.has(key)) icons.delete(key);
-		api.storage.session.set({ icons: Object.fromEntries(icons) });
-	}, 1000);
-}
 
 // --- snapshot sent to the switcher ---
 
@@ -484,14 +206,13 @@ async function snapshot(
 	if (settings.thisWindowOnly && !forSearch && current) {
 		tabs = tabs.filter((t) => t.windowId === current.windowId);
 	}
-	const inView = new Set(tabs.map((t) => t.id));
-	const known = new Set(stack);
-	const ids = [...stack, ...tabs.filter((t) => !known.has(t.id!)).map((t) => t.id!)].filter((id) => inView.has(id));
-
 	// the tab the switcher opened on always comes first
-	if (current) ids.unshift(...ids.splice(ids.indexOf(currentId!), 1));
-	if (!forSearch) ids.length = Math.min(ids.length, CYCLE_SENT);
-
+	const ids = order(
+		stack,
+		tabs.map((t) => t.id!),
+		currentId,
+		forSearch ? undefined : CYCLE_SENT,
+	);
 	return ids.map((id) => {
 		const t = byId.get(id)!;
 		return {
@@ -499,10 +220,10 @@ async function snapshot(
 			windowId: t.windowId,
 			title: t.title,
 			url: t.url,
-			icon: iconFor(t),
+			icon: thumbnails.iconFor(t),
 			audible: !!t.audible && !t.mutedInfo?.muted,
 			call: isCall(t),
-			thumb: forSearch ? null : (thumbs.get(t.id!) ?? savedThumbs.get(savedKey(t.url)!) ?? null),
+			thumb: forSearch ? null : thumbnails.thumbFor(t),
 		};
 	});
 }
@@ -518,7 +239,7 @@ async function recentlyClosed(): Promise<ClosedItem[]> {
 				sessionId: tab.sessionId,
 				title: tab.title,
 				url: tab.url,
-				icon: iconFor(tab),
+				icon: thumbnails.iconFor(tab),
 			}),
 		);
 }
@@ -563,7 +284,7 @@ api.commands.onCommand.addListener((command, tab) => {
 
 	// Capture the tab being left while it's still on screen: the freshest
 	// picture of it there will be.
-	if (tab && !overlayOpen.has(tab.id)) captureNow(tab);
+	if (tab && !overlayOpen.has(tab.id!)) thumbnails.captureNow(tab);
 	commandQueue = commandQueue.then(() => cycle(tab, timing)).catch((e) => console.error("[tabstack]", e));
 });
 
@@ -572,8 +293,8 @@ api.commands.onCommand.addListener((command, tab) => {
 // still being handled, before anything is awaited.
 function searchCommand(tab: chrome.tabs.Tab | undefined) {
 	if (!tab || switcherPort) return;
-	const inPopup = () => openSwitcher(tab, switcherStart(tab.id));
-	if (RESTRICTED.test(tab.url ?? "")) inPopup();
+	const inPopup = () => openSwitcher(tab, snapshot(tab.id));
+	if (!overlayCanRun(tab.url)) inPopup();
 	else api.tabs.sendMessage(tab.id!, { type: "search" } satisfies PageMessage, { frameId: 0 }).catch(inPopup);
 }
 
@@ -583,7 +304,7 @@ async function cycle(tab: chrome.tabs.Tab | undefined, timing: Timing) {
 
 	if (
 		blind &&
-		!overlayOpen.has(tab.id) &&
+		!overlayOpen.has(tab.id!) &&
 		Date.now() - blind.at < PRESS_GAP &&
 		blind.tabs[blind.index]?.id === tab.id
 	) {
@@ -592,9 +313,9 @@ async function cycle(tab: chrome.tabs.Tab | undefined, timing: Timing) {
 	}
 	blind = null;
 
-	if (!RESTRICTED.test(tab.url ?? "")) {
+	if (overlayCanRun(tab.url)) {
 		const message: CycleMessage = { type: "cycle", timing };
-		if (!overlayOpen.has(tab.id)) {
+		if (!overlayOpen.has(tab.id!)) {
 			const start = performance.now();
 			const [tabs, shortcut] = await Promise.all([snapshot(tab.id), switchShortcut()]);
 			Object.assign(message, { tabs, modifier: shortcut.modifier, switchCode: shortcut.code });
@@ -624,7 +345,7 @@ async function cycleWithoutOverlay(tab: chrome.tabs.Tab, timing: Timing) {
 	const target = tabs[1];
 	if (!target) return;
 
-	if (RESTRICTED.test(target.url ?? "")) {
+	if (!overlayCanRun(target.url)) {
 		blind = { tabs, index: 0, from: tab.id!, at: 0 };
 		await stepBlind(1);
 		return;
@@ -659,10 +380,10 @@ async function stepBlind(index: number) {
 	jump = null;
 	await activate(target.id, target.windowId);
 	if (target.id !== from) {
-		stack = [target.id, from, ...stack.filter((id) => id !== target.id && id !== from)];
+		stack = putFirst(stack, target.id, from);
 		save();
 	}
-	if (target.id === from || RESTRICTED.test(target.url ?? "")) return;
+	if (target.id === from || !overlayCanRun(target.url)) return;
 
 	blind = null;
 	jump = { from, via: target.id };
@@ -683,14 +404,9 @@ async function stepBlind(index: number) {
 	}
 }
 
-async function switcherStart(currentId: number | undefined): Promise<StartData> {
-	const [tabs, shortcut] = await Promise.all([snapshot(currentId), switchShortcut()]);
-	return { tabs, modifier: shortcut.modifier, switchCode: shortcut.code };
-}
-
 // The toolbar popup opens much faster than a window. It's pointed at the
 // switcher only until the switcher connects; clicking the icon shows settings.
-function openSwitcher(tab: chrome.tabs.Tab, start: Promise<StartData>) {
+function openSwitcher(tab: chrome.tabs.Tab, start: Promise<TabItem[]>) {
 	pendingSwitcher = start;
 	const action = api.action ?? api.browserAction;
 	if (!action.openPopup) {
@@ -715,52 +431,30 @@ async function openSwitcherWindow(tab: chrome.tabs.Tab) {
 		focused: true,
 		width,
 		height,
-		left: Math.round(win.left! + (win.width! - width) / 2),
-		top: Math.round(win.top! + (win.height! - height) / 3),
+		// centered on the window, or wherever the browser puts it when that's unknown
+		...(win.left != null && win.width != null && { left: Math.round(win.left + (win.width - width) / 2) }),
+		...(win.top != null && win.height != null && { top: Math.round(win.top + (win.height - height) / 3) }),
 	});
 }
 
 // --- the switch shortcut ---
 
-// Chrome reports "⌥⌘J" on macOS and "Ctrl+J" elsewhere; Firefox uses
-// "Command" and "MacCtrl", and its "Ctrl" means Command on macOS.
-// biome-ignore format: a table, kept a few to a line
-const SHORTCUT_KEYS: Record<string, string> = {
-	",": "Comma", Comma: "Comma", ".": "Period", Period: "Period", Space: "Space",
-	Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown", Insert: "Insert", Delete: "Delete",
-	"↑": "ArrowUp", Up: "ArrowUp", "↓": "ArrowDown", Down: "ArrowDown",
-	"←": "ArrowLeft", Left: "ArrowLeft", "→": "ArrowRight", Right: "ArrowRight",
-};
-
-// The shortcut, its key (Shift with it goes back a tab), and its modifier,
-// which is the key whose release ends a cycle.
+// The shortcut as the browser shows it, its key (Shift with it goes back a
+// tab), and its modifier, which is the key whose release ends a cycle.
 async function switchShortcut() {
 	const commands = await api.commands.getAll();
 	const shortcut = commands.find((c) => c.name === "switch")?.shortcut ?? "";
-	const key = shortcut.includes("+") ? shortcut.split("+").pop()! : shortcut.replace(/[⌃⌥⇧⌘]/g, "");
-
-	let code: string | null = SHORTCUT_KEYS[key] ?? null;
-	if (/^[a-z]$/i.test(key)) code = `Key${key.toUpperCase()}`;
-	else if (/^\d$/.test(key)) code = `Digit${key}`;
-	else if (/^F\d+$/.test(key)) code = key;
-
-	let modifier: Modifier = isMac ? "Meta" : "Control";
-	if (/⌘|Command/.test(shortcut)) modifier = "Meta";
-	else if (/⌃|MacCtrl/.test(shortcut)) modifier = "Control";
-	else if (/Ctrl/.test(shortcut)) modifier = isMac && isFirefox ? "Meta" : "Control";
-	else if (/⌥|Alt/.test(shortcut)) modifier = "Alt";
-
-	return { shortcut, code, modifier };
+	return { shortcut, ...parseShortcut(shortcut, { isMac, isFirefox }) };
 }
 
-// Chrome silently skips a suggested shortcut that's already taken. Turn the
-// toolbar icon red until one is set, rather than doing nothing on Cmd+J.
-// Otherwise a profile with a mark (profiles.ts) shows it there, so you can
-// tell which profile a window belongs to.
-let lastShortcutCheck = 0;
-let label: Label | null = null; // this profile's { name, mark }
-async function checkShortcut() {
-	lastShortcutCheck = Date.now();
+// --- the toolbar icon ---
+
+// Red until the switch shortcut is set: Chrome silently skips a suggested
+// shortcut that's already taken, and a red icon beats doing nothing on
+// Cmd+J. Otherwise a profile with a mark (profiles.ts) shows it there, so you
+// can tell which profile a window belongs to.
+async function updateToolbarIcon() {
+	lastIconUpdate = Date.now();
 	const { shortcut } = await switchShortcut();
 	const action = api.action ?? api.browserAction; // Firefox's build is Manifest V2
 	if (!shortcut) {
@@ -824,9 +518,9 @@ function drawMark({ icon, glyph, color, style }: Mark, size: number) {
 
 watchLabel((l) => {
 	label = l;
-	checkShortcut();
+	updateToolbarIcon();
 });
-api.commands.onChanged?.addListener(checkShortcut);
+api.commands.onChanged?.addListener(updateToolbarIcon);
 
 // --- messages from content scripts and tabstack's own pages ---
 //
@@ -850,12 +544,11 @@ const MESSAGES: { [K in MessageType]: Handler<K> } = {
 		run: (msg, { tabId }) => (msg.search ? searchTabs(tabId) : snapshot(tabId)),
 	},
 	tabsElsewhere: { from: "page", run: () => searchOthers() },
-	// these three are commits: the switcher page closes when they're done
+	// these three are commits (COMMITS): the switcher page closes when they're done
 	activate: {
 		from: "page",
 		run: async (msg, { tabId }) => {
-			if (tabId != null && jump?.via === tabId && msg.tabId !== jump.via && msg.tabId !== jump.from)
-				jump.to = msg.tabId;
+			if (tabId != null) jump = committed(jump, tabId, msg.tabId);
 			await activateItem(msg);
 			return { type: "done" };
 		},
@@ -893,14 +586,15 @@ const MESSAGES: { [K in MessageType]: Handler<K> } = {
 	open: {
 		from: "page",
 		run: (_msg, { tabId }) => {
-			overlayOpen.add(tabId);
+			if (tabId != null) overlayOpen.add(tabId);
 		},
 	},
 	close: {
 		from: "page",
 		run: (_msg, { tabId }) => {
+			if (tabId == null) return;
 			overlayOpen.delete(tabId);
-			if (tabId != null && jump?.via === tabId && jump.to == null) jump = null;
+			jump = overlayClosed(jump, tabId);
 		},
 	},
 	// from an iframe to the top frame, which owns the overlay: only what
@@ -928,10 +622,12 @@ const MESSAGES: { [K in MessageType]: Handler<K> } = {
 	profiles: { from: "extension", run: () => profiles?.status() },
 	profilesShared: { from: "extension", run: (msg) => profiles?.setShared(msg.values) },
 	profilesConnect: { from: "extension", run: () => profiles?.reconnect() },
-	checkShortcut: { from: "extension", run: () => checkShortcut() },
+	// from settings, which may follow a change to the shortcut
+	checkShortcut: { from: "extension", run: () => updateToolbarIcon() },
 };
 
 const RELAYED_KEYS = ["Meta", "Control", "Alt", "Shift"]; // content/relay.ts's MODIFIERS
+const COMMITS: unknown[] = ["activate", "restore", "switchProfile"] satisfies MessageType[];
 
 // Tabstack's own pages, by where they're from: those open in a tab (setup,
 // the switcher's window) have sender.tab as a content script does. Firefox
@@ -974,7 +670,7 @@ api.runtime.onConnect.addListener((port) => {
 	const start = pendingSwitcher;
 	pendingSwitcher = null;
 	Promise.resolve(start)
-		.then((s) => port.postMessage({ type: "start", ...s } satisfies StartMessage))
+		.then((tabs) => port.postMessage({ type: "start", ...(tabs && { tabs }) } satisfies StartMessage))
 		.catch(() => {}); // closed before it started
 
 	port.onDisconnect.addListener(() => {
@@ -993,5 +689,7 @@ api.runtime.onConnect.addListener((port) => {
 		// an answer with a type is one of the replies the switcher page knows
 		const answer = (await handle(msg, { ...port.sender, tab: undefined }, post)) as Partial<PortReply> | undefined;
 		if (answer?.type) post(answer as PortReply);
+		// a commit that failed is over too, and the page closes either way
+		else if (COMMITS.includes(msg?.type)) post({ type: "done" });
 	});
 });
