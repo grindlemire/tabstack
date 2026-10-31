@@ -30,13 +30,18 @@ func doctor(w io.Writer) error {
 	}
 	fmt.Fprintf(w, "tabstack %s, %s\n", version, lastingPath(self))
 
+	// each line as plain text: names, versions and paths come from the
+	// profiles and the hub, and could carry terminal escapes
+	say := func(mark, format string, args ...any) {
+		fmt.Fprintf(w, "  %s %s\n", mark, printable(fmt.Sprintf(format, args...)))
+	}
 	problems := 0
 	bad := func(format string, args ...any) {
 		problems++
-		fmt.Fprintf(w, "  ✗ "+format+"\n", args...)
+		say("✗", format, args...)
 	}
-	good := func(format string, args ...any) { fmt.Fprintf(w, "  ✓ "+format+"\n", args...) }
-	note := func(format string, args ...any) { fmt.Fprintf(w, "  · "+format+"\n", args...) }
+	good := func(format string, args ...any) { say("✓", format, args...) }
+	note := func(format string, args ...any) { say("·", format, args...) }
 
 	fixed, err := repair(home)
 	if err != nil {
@@ -138,7 +143,7 @@ func doctor(w io.Writer) error {
 		if lines := lastLines(logPath, 5); len(lines) > 0 {
 			fmt.Fprintf(w, "\nThe end of %s\n", logPath)
 			for _, l := range lines {
-				fmt.Fprintf(w, "  %s\n", l)
+				fmt.Fprintf(w, "  %s\n", printable(l)) // which quotes what helpers were sent
 			}
 		}
 	}

@@ -25,11 +25,13 @@ type entry struct {
 	peer *peerInfo // set while it's connected
 }
 
+// name is what the command line calls it, as plain text: a profile's
+// name is whatever it says, and could carry terminal escapes.
 func (e entry) name() string {
 	if e.peer != nil && e.peer.Info.Name != "" {
-		return e.peer.Info.Name
+		return printable(e.peer.Info.Name)
 	}
-	return cmp.Or(e.p.name, e.p.dir, "(unnamed)")
+	return printable(cmp.Or(e.p.name, e.p.dir, "(unnamed)"))
 }
 
 func (e entry) state() string {
@@ -237,14 +239,14 @@ func list(w io.Writer) error {
 		if group != heading {
 			heading = group
 			if h, ok := hubs[group]; ok {
-				fmt.Fprintf(w, "%s (helper %s)\n", heading, cmp.Or(h.version, "older"))
+				fmt.Fprintf(w, "%s (helper %s)\n", heading, printable(cmp.Or(h.version, "older")))
 			} else {
 				fmt.Fprintln(w, heading)
 			}
 		}
 		fmt.Fprintf(w, "  %2d  %-26s %-12s %s\n", e.n, e.name(), e.p.dir, e.state())
 		if e.peer != nil && len(e.peer.Info.Claims) > 0 {
-			fmt.Fprintf(w, "      links: %s\n", strings.Join(e.peer.Info.Claims, ", "))
+			fmt.Fprintf(w, "      links: %s\n", printable(strings.Join(e.peer.Info.Claims, ", ")))
 		}
 	}
 	return nil
@@ -387,7 +389,7 @@ func rename(w io.Writer, arg, name string) error {
 	if !s.until(id, func(p *peerInfo) bool { return p != nil && p.Info.Name == name }) {
 		return fmt.Errorf("%s didn't take the name", e.name())
 	}
-	fmt.Fprintf(w, "Renamed %s to %s.\n", e.name(), name)
+	fmt.Fprintf(w, "Renamed %s to %s.\n", e.name(), printable(name))
 	return nil
 }
 
@@ -414,7 +416,7 @@ func links(w io.Writer, args []string) error {
 			fmt.Fprintf(w, "No links open in %s.\n", e.name())
 		}
 		for _, c := range current {
-			fmt.Fprintln(w, c)
+			fmt.Fprintln(w, printable(c))
 		}
 		return nil
 	}
@@ -438,6 +440,6 @@ func links(w io.Writer, args []string) error {
 	if !s.until(id, func(p *peerInfo) bool { return p != nil && slices.Equal(p.Info.Claims, next) }) {
 		return fmt.Errorf("%s didn't take the change", e.name())
 	}
-	fmt.Fprintf(w, "Links that open in %s: %s\n", e.name(), cmp.Or(strings.Join(next, ", "), "none"))
+	fmt.Fprintf(w, "Links that open in %s: %s\n", e.name(), printable(cmp.Or(strings.Join(next, ", "), "none")))
 	return nil
 }

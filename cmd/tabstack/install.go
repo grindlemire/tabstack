@@ -100,21 +100,26 @@ func (b browser) key(p profile) string {
 // saves some seconds after a change, so a profile folder it doesn't list yet
 // still counts, named after its folder.
 func profiles(b browser) ([]profile, error) {
+	// each profile read on its own, as findTabstack reads extensions: one
+	// the browser wrote in a way this doesn't expect keeps its folder's name,
+	// and the rest theirs
 	var state struct {
 		Profile struct {
-			InfoCache map[string]struct {
-				Name string `json:"name"`
-			} `json:"info_cache"`
+			InfoCache map[string]json.RawMessage `json:"info_cache"`
 		} `json:"profile"`
 	}
 	if raw, err := os.ReadFile(filepath.Join(b.dataDir, "Local State")); err == nil {
-		if err := json.Unmarshal(raw, &state); err != nil {
+		if err := json.Unmarshal(raw, &state); err != nil && !errors.As(err, new(*json.UnmarshalTypeError)) {
 			return nil, fmt.Errorf("reading %s's Local State: %w", b.name, err)
 		}
 	}
 	names := map[string]string{}
-	for dir, info := range state.Profile.InfoCache {
-		names[dir] = info.Name
+	for dir, raw := range state.Profile.InfoCache {
+		var info struct {
+			Name string `json:"name"`
+		}
+		json.Unmarshal(raw, &info)
+		names[dir] = info.Name // "" for one that isn't read: named after its folder
 	}
 	folders, _ := filepath.Glob(filepath.Join(b.dataDir, "*", "Preferences"))
 	for _, prefs := range folders {
@@ -552,7 +557,7 @@ func connectAll(w io.Writer, home string, targets []target) error {
 			missed = append(missed, t)
 			continue
 		}
-		fmt.Fprintf(w, "  %s: connected, waiting for Done…\n", cmp.Or(peer.Info.Name, t.p.name))
+		fmt.Fprintf(w, "  %s: connected, waiting for Done…\n", printable(cmp.Or(peer.Info.Name, t.p.name)))
 		if peer.Info.Done == nil {
 			// Chrome keeps running the background code tabstack started with,
 			// until it's reloaded, and that code predates Done
@@ -563,7 +568,7 @@ func connectAll(w io.Writer, home string, targets []target) error {
 			fmt.Fprintf(w, "  %s is connected, but Done wasn't clicked; moving on.\n", t.p.name)
 			continue
 		}
-		fmt.Fprintf(w, "  ✓ %s\n", cmp.Or(peer.Info.Name, t.p.name))
+		fmt.Fprintf(w, "  ✓ %s\n", printable(cmp.Or(peer.Info.Name, t.p.name)))
 	}
 	if len(missed) > 0 {
 		for _, t := range missed {

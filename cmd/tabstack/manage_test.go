@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -113,4 +114,49 @@ func TestMovesToNewBinary(t *testing.T) {
 	b.expect(t, "reconnect")
 	// and only once
 	a.expectNothing(t)
+}
+
+// What a profile says about itself reaches the terminal as plain text, in
+// every command that prints it: a name or a claim can't carry escapes.
+func TestPeerTextIsPlain(t *testing.T) {
+	isolate(t)
+	dir := os.Getenv("TABSTACK_HOST_DIR")
+	h := &hub{peers: map[*peer]bool{}}
+	serveHub(t, dir, 1, h.handle)
+	conn, lines := pipePeer(t, h, "1", false)
+	info := `{"name":"Wo\u001b[31mrk\u009b","claims":["corp\u001b]0;pwned\u0007.com","\u009b2Jx.com"]}`
+	if _, err := conn.Write([]byte(`{"type":"state","profile":"1","info":` + info + "}\n")); err != nil {
+		t.Fatal(err)
+	}
+	for line := range lines {
+		if strings.Contains(string(line), "pwned") {
+			break
+		}
+	}
+	// and a line of the log, which doctor shows
+	if err := os.WriteFile(filepath.Join(dir, "host.log"), []byte("hub: skipped a message from \x1b[2J\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"list"}, []string{"Wo[31mrk", "links: corp]0;pwned.com, 2Jx.com"}},
+		{[]string{"links", "1"}, []string{"corp]0;pwned.com\n2Jx.com\n"}},
+		{[]string{"doctor"}, []string{"Wo[31mrk: connected, but install didn't", "skipped a message from [2J"}},
+	} {
+		var out strings.Builder
+		if err := run(c.args, &out); err != nil {
+			t.Errorf("%q: %v", c.args, err)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out.String(), w) {
+				t.Errorf("%q printed\n%q\nwant %q", c.args, out.String(), w)
+			}
+		}
+		if strings.ContainsAny(out.String(), "\x1b\x07\u009b") {
+			t.Errorf("%q printed control characters: %q", c.args, out.String())
+		}
+	}
 }

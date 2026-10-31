@@ -42,7 +42,7 @@ func TestCovers(t *testing.T) {
 
 // A claim is anyone's who joins the hub, and one too big for regexp, or big
 // enough to take seconds to compile, matches nothing rather than crash or
-// stall tabstack open.
+// stall tabstack open. Where the limit falls is in covers.json, for both.
 func TestCoversHugePattern(t *testing.T) {
 	u, _ := url.Parse("https://corp.com/a/b")
 	for _, pattern := range []string{
@@ -58,9 +58,6 @@ func TestCoversHugePattern(t *testing.T) {
 		if took := time.Since(start); took > 100*time.Millisecond {
 			t.Errorf("a %d-byte pattern took %v", len(pattern), took)
 		}
-	}
-	if !covers("corp.com/"+strings.Repeat("*", maxPattern-len("corp.com/")), u) {
-		t.Errorf("a pattern of maxPattern bytes doesn't count")
 	}
 }
 

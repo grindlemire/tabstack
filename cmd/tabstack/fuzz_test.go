@@ -148,6 +148,7 @@ func FuzzProfiles(f *testing.F) {
 	f.Add([]byte(``), []byte(`{"extensions":{"settings":{"`+lookalikeID+`":{"active_permissions":{"api":[`+override+`]}},"`+storeID+`":`+store+`}}}`), []byte(``))
 	f.Add([]byte(`{"extensions":{"settings":5}}`), []byte(`{"extensions":[]}`), []byte(`{"profile":{"info_cache":{"Default":{"name":5}}}}`))
 	f.Add([]byte(`{"extensions":{"settings":{"`+unpackedID+`":{"path":"/","location":4,"disable_reasons":[],"state":1}}}}`), []byte(`null`), []byte(`[`))
+	f.Add([]byte(``), []byte(``), []byte(`{"profile":{"info_cache":{"Default":{"name":5},"Profile 1":"x","Profile 2":{"name":"Work"}}}}`))
 	f.Fuzz(func(t *testing.T, prefs, secure, localState []byte) {
 		data := t.TempDir()
 		for path, b := range map[string][]byte{
@@ -162,7 +163,11 @@ func FuzzProfiles(f *testing.F) {
 				t.Fatal(err)
 			}
 		}
-		list, _ := profiles(browser{name: "Test", dataDir: data})
+		list, err := profiles(browser{name: "Test", dataDir: data})
+		// only a Local State that isn't JSON hides the browser
+		if err != nil && json.Valid(localState) {
+			t.Fatalf("profiles: %v", err)
+		}
 		for _, p := range list {
 			if p.id != "" && p.id != storeID && !extensionID.MatchString(p.id) {
 				t.Fatalf("found tabstack as %q", p.id)

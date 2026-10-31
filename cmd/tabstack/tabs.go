@@ -129,8 +129,9 @@ func lostHubs(lost []error) error {
 }
 
 // printable is s without control characters (C0, DEL and C1), which a
-// terminal would take as commands: a title can't move the cursor, recolor
-// the screen or retitle the window.
+// terminal would take as commands: a title, or anything else a profile or
+// the hub says, can't move the cursor, recolor the screen or retitle the
+// window. Every command prints what came from them through it.
 func printable(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
@@ -222,7 +223,7 @@ func (s *session) request(e entry, body map[string]any) error {
 		var r struct{ Error string }
 		json.Unmarshal(answers[0].Body, &r)
 		if r.Error != "" {
-			return fmt.Errorf("%s: %s", e.name(), r.Error)
+			return fmt.Errorf("%s: %s", e.name(), printable(r.Error))
 		}
 		return nil
 	}

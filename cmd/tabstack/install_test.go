@@ -432,3 +432,44 @@ func TestFindTabstackOddEntries(t *testing.T) {
 		t.Errorf("findTabstack = %q, %v; want %q, true", id, granted, storeID)
 	}
 }
+
+// A profile the browser recorded in an unexpected shape in Local State
+// keeps its folder's name, and doesn't hide the browser's other profiles.
+func TestProfilesOddLocalState(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		state string
+		want  []profile
+	}{
+		{"a name of the wrong type", `{"profile":{"info_cache":{"Default":{"name":5},"Profile 1":{"name":"Work"}}}}`,
+			[]profile{{dir: "Default", name: "Default"}, {dir: "Profile 1", name: "Work"}}},
+		{"an entry that isn't an object", `{"profile":{"info_cache":{"Default":"Me","Profile 1":{"name":"Work"}}}}`,
+			[]profile{{dir: "Default", name: "Default"}, {dir: "Profile 1", name: "Work"}}},
+		{"no list of them", `{"profile":{"info_cache":[]}}`,
+			[]profile{{dir: "Default", name: "Default"}, {dir: "Profile 1", name: "Profile 1"}}},
+		{"no profile section", `{"profile":5}`,
+			[]profile{{dir: "Default", name: "Default"}, {dir: "Profile 1", name: "Profile 1"}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			data := t.TempDir()
+			for _, dir := range []string{"Default", "Profile 1"} {
+				writeJSON(t, filepath.Join(data, dir, "Preferences"), map[string]any{})
+			}
+			if err := os.WriteFile(filepath.Join(data, "Local State"), []byte(c.state), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := profiles(browser{name: "Test", dataDir: data})
+			if err != nil || !slices.Equal(got, c.want) {
+				t.Errorf("profiles = %+v, %v; want %+v", got, err, c.want)
+			}
+		})
+	}
+	// Local State that isn't JSON at all still says so
+	data := t.TempDir()
+	if err := os.WriteFile(filepath.Join(data, "Local State"), []byte(`{"profile":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := profiles(browser{name: "Test", dataDir: data}); err == nil {
+		t.Error("profiles read a Local State that's cut off")
+	}
+}
