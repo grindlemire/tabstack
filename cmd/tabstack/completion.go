@@ -11,36 +11,57 @@ import (
 // completion prints the script that completes these commands in a shell,
 // for Homebrew to install or to source from a shell's startup file.
 func completion(w io.Writer, shell string) error {
-	var names, all, first, described, fish string
+	var names, all, first []string
+	var described, fish string
 	for _, c := range commands {
 		if c.hidden {
 			continue
 		}
 		about := cmp.Or(c.about, c.help)
-		names += " " + c.name
+		names = append(names, c.name)
 		// a ' ends a single-quoted string, in zsh by '\'' and in fish by \'
 		described += fmt.Sprintf("\n    '%s:%s'", c.name, strings.ReplaceAll(about, "'", `'\''`))
 		fish += fmt.Sprintf("complete -c tabstack -n __fish_use_subcommand -a %s -d '%s'\n", c.name, strings.ReplaceAll(about, "'", `\'`))
 		switch c.profiles {
 		case "all":
-			all += "|" + c.name
+			all = append(all, c.name)
 		case "first":
-			first += "|" + c.name
+			first = append(first, c.name)
 		}
 	}
-	all, first = all[1:], first[1:]
 	switch shell {
 	case "bash":
-		fmt.Fprintf(w, bashCompletion, names[1:], all, first)
+		fmt.Fprintf(w, bashCompletion, strings.Join(names, " "), caseArms(all, first, "COMP_CWORD == 2"))
 	case "zsh":
-		fmt.Fprintf(w, zshCompletion, described, all, first)
+		fmt.Fprintf(w, zshCompletion, described, caseArms(all, first, "CURRENT == 3"))
 	case "fish":
 		fmt.Fprint(w, fish)
-		fmt.Fprintf(w, fishProfiles, strings.ReplaceAll(all, "|", " "), strings.ReplaceAll(first, "|", " "))
+		fmt.Fprint(w, fishFixed)
+		if len(all) > 0 {
+			fmt.Fprintf(w, fishAll, strings.Join(all, " "))
+		}
+		if len(first) > 0 {
+			fmt.Fprintf(w, fishFirst, strings.Join(first, " "))
+		}
 	default:
 		return fmt.Errorf("completion is for bash, zsh or fish, not %q", shell)
 	}
 	return nil
+}
+
+// caseArms are the arms of bash's and zsh's case that go on to complete
+// profiles: for every argument of the commands in all, and only the first
+// (while onFirst) of those in first. An arm with no commands, ") ;;", is a
+// syntax error, so there's none.
+func caseArms(all, first []string, onFirst string) string {
+	var arms string
+	if len(all) > 0 {
+		arms += fmt.Sprintf("    %s) ;;\n", strings.Join(all, "|"))
+	}
+	if len(first) > 0 {
+		arms += fmt.Sprintf("    %s) (( %s )) || return ;;\n", strings.Join(first, "|"), onFirst)
+	}
+	return arms
 }
 
 // completeProfiles prints what each profile can be called, one per line,
@@ -71,9 +92,7 @@ const bashCompletion = `_tabstack() {
     return
   fi
   case ${COMP_WORDS[1]} in
-    %s) ;;
-    %s) (( COMP_CWORD == 2 )) || return ;;
-    completion) COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur")); return ;;
+%s    completion) COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur")); return ;;
     *) return ;;
   esac
   local IFS=$'\n' name
@@ -97,9 +116,7 @@ _tabstack() {
     return
   fi
   case $words[2] in
-    %s) ;;
-    %s) (( CURRENT == 3 )) || return ;;
-    completion) compadd bash zsh fish; return ;;
+%s    completion) compadd bash zsh fish; return ;;
     *) return ;;
   esac
   profiles=("${(@f)$(tabstack __profiles 2>/dev/null)}")
@@ -113,8 +130,12 @@ else
 fi
 `
 
-const fishProfiles = `complete -c tabstack -f
+const fishFixed = `complete -c tabstack -f
 complete -c tabstack -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
-complete -c tabstack -n '__fish_seen_subcommand_from %s' -a '(tabstack __profiles 2>/dev/null)'
-complete -c tabstack -n '__fish_seen_subcommand_from %s; and test (count (commandline -opc)) -eq 2' -a '(tabstack __profiles 2>/dev/null)'
+`
+
+const fishAll = `complete -c tabstack -n '__fish_seen_subcommand_from %s' -a '(tabstack __profiles 2>/dev/null)'
+`
+
+const fishFirst = `complete -c tabstack -n '__fish_seen_subcommand_from %s; and test (count (commandline -opc)) -eq 2' -a '(tabstack __profiles 2>/dev/null)'
 `

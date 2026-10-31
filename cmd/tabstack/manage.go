@@ -393,8 +393,8 @@ func rename(w io.Writer, arg, name string) error {
 
 // links lists, adds or removes the links that open in a profile.
 func links(w io.Writer, args []string) error {
-	if len(args) == 0 {
-		return errors.New("links needs a profile: tabstack links <profile> [add|remove <pattern>...]")
+	if len(args) == 0 || len(args) == 2 {
+		return usageError("links")
 	}
 	s, err := openSession()
 	if err != nil {
@@ -417,9 +417,6 @@ func links(w io.Writer, args []string) error {
 			fmt.Fprintln(w, c)
 		}
 		return nil
-	}
-	if len(args) < 3 {
-		return errors.New("tabstack links <profile> add|remove <pattern>...")
 	}
 	next := slices.Clone(current)
 	switch args[1] {

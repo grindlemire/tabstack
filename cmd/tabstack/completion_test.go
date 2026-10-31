@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -112,5 +114,79 @@ func TestUnknownCommand(t *testing.T) {
 	err := run([]string{"stauts"}, &strings.Builder{})
 	if err == nil || !strings.HasPrefix(err.Error(), `unknown command "stauts"`) || !strings.Contains(err.Error(), "Usage:") {
 		t.Errorf("run(stauts) = %v, want the usage text", err)
+	}
+}
+
+// Commands that take no profiles, or only one kind, leave their arm out of
+// each script: an empty one is a syntax error.
+func TestCompletionWithoutProfiles(t *testing.T) {
+	saved := commands
+	t.Cleanup(func() { commands = saved })
+	for _, c := range []struct {
+		name     string
+		profiles []string
+	}{
+		{"none", []string{"", ""}},
+		{"only all", []string{"all", ""}},
+		{"only first", []string{"", "first"}},
+		{"all hidden", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			commands = []command{{name: "__hidden", hidden: true}}
+			for i, p := range c.profiles {
+				commands = append(commands, command{name: fmt.Sprintf("cmd%d", i), profiles: p, help: "x"})
+			}
+			for shell, script := range scripts(t) {
+				if strings.Contains(script, "    ) ") || strings.Contains(script, "from '") || strings.Contains(script, "from ;") {
+					t.Errorf("the %s script has an empty list:\n%s", shell, script)
+				}
+				checkSyntax(t, shell, script)
+			}
+		})
+	}
+}
+
+// Every synopsis in the usage text has at least two spaces before what it
+// does, or what it does goes below it.
+func TestUsageColumns(t *testing.T) {
+	text := usage()
+	for _, c := range commands {
+		if c.hidden {
+			continue
+		}
+		synopsis := "  " + strings.TrimSpace("tabstack "+c.name+" "+c.args)
+		i := strings.Index(text, synopsis)
+		if i < 0 {
+			t.Errorf("the usage text doesn't have %q", synopsis)
+			continue
+		}
+		rest := text[i+len(synopsis):]
+		if !strings.HasPrefix(rest, "\n") && !strings.HasPrefix(rest, "  ") {
+			t.Errorf("%q runs into what it does: %q", synopsis, strings.SplitN(text[i:], "\n", 2)[0])
+		}
+	}
+}
+
+// A command run wrong says so one way: its line of the usage text.
+func TestUsageErrors(t *testing.T) {
+	isolate(t)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"connect"}, "usage: tabstack connect <profile>... (tabstack list shows the profiles)"},
+		{[]string{"disconnect"}, "usage: tabstack disconnect --all|<profile>... (tabstack list shows the profiles)"},
+		{[]string{"reset"}, "usage: tabstack reset <profile>..."},
+		{[]string{"rename", "1"}, "usage: tabstack rename <profile> <name>"},
+		{[]string{"links"}, "usage: tabstack links <profile> [add|remove <pattern>...]"},
+		{[]string{"links", "1", "add"}, "usage: tabstack links"},
+		{[]string{"focus"}, "usage: tabstack focus <profile> [<tab>]"},
+		{[]string{"open"}, "usage: tabstack open [--profile <profile>] <link>..."},
+		{[]string{"completion"}, "usage: tabstack completion bash|zsh|fish"},
+	} {
+		err := run(c.args, io.Discard)
+		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%q: %v, want %q", c.args, err, c.want)
+		}
 	}
 }

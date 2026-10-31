@@ -49,8 +49,8 @@ func init() {
 		{name: "connect", args: "<profile>...", profiles: "all", run: needsProfile("connect", connect),
 			help:  "connect profiles (one click in each)",
 			about: "connect profiles"},
-		{name: "disconnect", args: "<profile>...", profiles: "all", run: runDisconnect,
-			help:  "stop profiles connecting; --all for every one",
+		{name: "disconnect", args: "--all|<profile>...", profiles: "all", run: runDisconnect,
+			help:  "stop profiles connecting, or every one",
 			about: "stop profiles connecting"},
 		{name: "reset", args: "<profile>...", profiles: "all", run: needsProfile("reset", reset),
 			help:  "clear a profile's name and links, and reconnect it",
@@ -116,7 +116,8 @@ func usage() string {
 		}
 		synopsis := strings.TrimSpace("tabstack " + c.name + " " + c.args)
 		lines := strings.Split(c.help, "\n")
-		if len(synopsis) < usageColumn-2 {
+		// at least two spaces between them, so neither reads into the other
+		if len(synopsis) <= usageColumn-4 {
 			fmt.Fprintf(&b, "  %-*s%s\n", usageColumn-2, synopsis, lines[0])
 			lines = lines[1:]
 		} else {
@@ -173,10 +174,41 @@ func noArgs(f func(io.Writer) error) func(io.Writer, []string) error {
 func needsProfile(name string, f func(io.Writer, []string) error) func(io.Writer, []string) error {
 	return func(w io.Writer, args []string) error {
 		if len(args) == 0 {
-			return fmt.Errorf("%s needs a profile; run tabstack list to see them", name)
+			return usageError(name)
 		}
 		return f(w, args)
 	}
+}
+
+// usageError is what every command says when it's run wrong: its line of
+// the usage text, and for one that takes profiles, where to find them.
+func usageError(name string) error {
+	c, _ := lookup(name)
+	msg := "usage: " + strings.TrimSpace("tabstack "+c.name+" "+c.args)
+	if c.profiles != "" {
+		msg += " (tabstack list shows the profiles)"
+	}
+	return errors.New(msg)
+}
+
+// parseFlags parses a command's flags, and says whether to stop there: on
+// a mistake, and on -h, which prints them and isn't one. Go's flag stops at
+// the first argument that isn't a flag, so a flag after it (tabstack open
+// corp.com --profile Work) would be taken for one of the rest; it's
+// refused, by what the rest are.
+func parseFlags(fs *flag.FlagSet, args []string, rest string) (stop bool, err error) {
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return true, nil
+		}
+		return true, err
+	}
+	for _, a := range fs.Args()[min(1, fs.NArg()):] {
+		if len(a) > 1 && strings.HasPrefix(a, "-") {
+			return true, fmt.Errorf("%s: flags go before the %s", a, rest)
+		}
+	}
+	return false, nil
 }
 
 func runInstall(w io.Writer, args []string) error {
@@ -189,7 +221,7 @@ func runInstall(w io.Writer, args []string) error {
 		ids = append(ids, s)
 		return nil
 	})
-	if err := fs.Parse(args); err != nil {
+	if stop, err := parseFlags(fs, args, "rest"); stop {
 		return err
 	}
 	return install(w, ids)
@@ -199,7 +231,7 @@ func runDisconnect(w io.Writer, args []string) error {
 	all := slices.Contains(args, "--all")
 	args = slices.DeleteFunc(args, func(a string) bool { return a == "--all" })
 	if len(args) == 0 && !all {
-		return errors.New("disconnect needs a profile, or --all; run tabstack list to see them")
+		return usageError("disconnect")
 	}
 	_, err := disconnect(w, args, all)
 	return err
@@ -207,14 +239,14 @@ func runDisconnect(w io.Writer, args []string) error {
 
 func runRename(w io.Writer, args []string) error {
 	if len(args) != 2 {
-		return errors.New("tabstack rename <profile> <name>")
+		return usageError("rename")
 	}
 	return rename(w, args[0], args[1])
 }
 
 func runCompletion(w io.Writer, args []string) error {
 	if len(args) != 1 {
-		return errors.New("tabstack completion bash|zsh|fish")
+		return usageError("completion")
 	}
 	return completion(w, args[0])
 }

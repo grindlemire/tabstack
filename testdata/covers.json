@@ -10,6 +10,8 @@
   { "pattern": "*", "url": "https://anything.example/", "covers": true },
   { "pattern": "https://corp.com/", "url": "http://corp.com/a", "covers": true },
   { "pattern": "HTTPS://corp.com", "url": "https://corp.com/", "covers": true },
+  { "pattern": "http://https://corp.com", "url": "https://corp.com/", "covers": false, "why": "only one scheme comes off, leaving the site https:" },
+  { "pattern": "https://http://corp.com", "url": "https://corp.com/", "covers": false },
   { "pattern": "  corp.com  ", "url": "https://corp.com/", "covers": true },
   { "pattern": "", "url": "https://corp.com/", "covers": false },
   { "pattern": "corp.com", "url": "https://corp.com.evil.com/", "covers": false },

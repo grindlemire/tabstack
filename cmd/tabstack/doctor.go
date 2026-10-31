@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -145,7 +146,7 @@ func doctor(w io.Writer) error {
 	switch problems {
 	case 0:
 	case 1:
-		return fmt.Errorf("found a problem")
+		return errors.New("found a problem")
 	default:
 		return fmt.Errorf("found %d problems", problems)
 	}

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -43,7 +44,7 @@ type tab struct {
 func tabs(w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("tabs", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "one JSON object per tab")
-	if err := fs.Parse(args); err != nil {
+	if stop, err := parseFlags(fs, args, "words"); stop {
 		return err
 	}
 	s, err := openSession()
@@ -59,11 +60,12 @@ func tabs(w io.Writer, args []string) error {
 		}
 	}
 	var all []tab
+	var lost []error // hubs whose connection broke part way, with the answers they'd given
 	asked, answered := 0, 0
 	for _, c := range s.hubs {
 		answers, err := c.ask("*", map[string]any{"kind": "tabs"}, askFor)
 		if err != nil {
-			return err
+			lost = append(lost, err)
 		}
 		asked += len(c.peers)
 		answered += len(answers)
@@ -81,6 +83,10 @@ func tabs(w io.Writer, args []string) error {
 	if len(s.hubs) == 0 {
 		return errors.New("no profile is connected; is the browser open?")
 	}
+	lostErr := lostHubs(lost)
+	if answered == 0 && lostErr != nil {
+		return lostErr
+	}
 	if answered == 0 && asked > 0 {
 		return errors.New("no profile answered. " + reloadHint)
 	}
@@ -92,28 +98,72 @@ func tabs(w io.Writer, args []string) error {
 	slices.SortStableFunc(all, func(a, b tab) int { return cmp.Compare(b.LastAccessed, a.LastAccessed) })
 
 	if *asJSON {
-		enc := json.NewEncoder(w)
 		for _, t := range all {
-			enc.Encode(t)
+			raw, _ := json.Marshal(t)
+			w.Write(append(escapeControls(raw), '\n'))
 		}
-		return nil
+		return lostErr
 	}
 	// the profile, the tab's number for focus, and its title over its address
 	nameW, idW := 0, 0
-	for _, t := range all {
+	for i, t := range all {
+		// a page picks its title, and escapes in it would reach the terminal
+		t.ProfileName, t.Title, t.URL = printable(t.ProfileName), printable(t.Title), printable(t.URL)
+		all[i] = t
 		nameW = max(nameW, len(t.ProfileName))
 		idW = max(idW, len(strconv.Itoa(t.ID)))
 	}
 	for _, t := range all {
 		fmt.Fprintf(w, "%-*s  %*d  %s\n%*s%s\n", nameW, t.ProfileName, idW, t.ID, t.Title, nameW+idW+4, "", t.URL)
 	}
-	return nil
+	return lostErr
+}
+
+// lostHubs says which hubs' connections broke while tabs asked them; nil
+// when none did. The tabs of the rest are still listed.
+func lostHubs(lost []error) error {
+	if len(lost) == 0 {
+		return nil
+	}
+	return fmt.Errorf("lost a browser's helper part way, so some tabs may be missing: %w", errors.Join(lost...))
+}
+
+// printable is s without control characters (C0, DEL and C1), which a
+// terminal would take as commands: a title can't move the cursor, recolor
+// the screen or retitle the window.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// escapeControls escapes the control characters encoding/json writes as
+// they are, since it escapes only those below a space: DEL, and the C1s,
+// which some terminals take as commands. Outside its strings JSON has
+// neither, so each is in one.
+func escapeControls(raw []byte) []byte {
+	var out []byte
+	for i := 0; i < len(raw); i++ {
+		switch {
+		case raw[i] == 0x7f:
+			out = append(out, `\u007f`...)
+		case raw[i] == 0xC2 && i+1 < len(raw) && raw[i+1] >= 0x80 && raw[i+1] <= 0x9F: // a C1's UTF-8
+			out = fmt.Appendf(out, `\u%04x`, raw[i+1])
+			i++
+		default:
+			out = append(out, raw[i])
+		}
+	}
+	return out
 }
 
 // focus brings a profile forward, or one of its tabs, in its window.
 func focus(w io.Writer, args []string) error {
 	if len(args) < 1 || len(args) > 2 {
-		return errors.New("tabstack focus <profile> [<tab>]")
+		return usageError("focus")
 	}
 	s, err := openSession()
 	if err != nil {
@@ -185,11 +235,11 @@ func (s *session) request(e entry, body map[string]any) error {
 func open(w io.Writer, args []string) error {
 	fs := flag.NewFlagSet("open", flag.ContinueOnError)
 	in := fs.String("profile", "", "open them in this profile")
-	if err := fs.Parse(args); err != nil {
+	if stop, err := parseFlags(fs, args, "links"); stop {
 		return err
 	}
 	if fs.NArg() == 0 {
-		return errors.New("tabstack open [--profile <profile>] <link>...")
+		return usageError("open")
 	}
 	s, err := openSession()
 	if err != nil {
@@ -282,8 +332,16 @@ func start(name string, args ...string) error {
 // subdomains, and a path covers everything under it. A * matches anything.
 // A port ("localhost:3000") has to match too; without one, any port does.
 func covers(pattern string, u *url.URL) bool {
+	if len(pattern) > maxPattern {
+		return false
+	}
 	p := strings.ToLower(strings.TrimSpace(pattern))
-	p = strings.TrimPrefix(strings.TrimPrefix(p, "http://"), "https://")
+	// one scheme, as tabstack takes off: "http://https://x" keeps the second
+	if rest, ok := strings.CutPrefix(p, "https://"); ok {
+		p = rest
+	} else {
+		p = strings.TrimPrefix(p, "http://")
+	}
 	site, path, _ := strings.Cut(p, "/")
 	// an IPv6 address is bracketed when it has a port, and may be bare when it hasn't
 	host, port := "["+site+"]", ""
@@ -306,7 +364,7 @@ func covers(pattern string, u *url.URL) bool {
 	} else {
 		hostPattern = `(?:www\.)?` + glob(host, "[^/]*")
 	}
-	if !regexp.MustCompile(`^` + hostPattern + `$`).MatchString(browserHost(u)) {
+	if !matches(`^`+hostPattern+`$`, browserHost(u)) {
 		return false
 	}
 	// "localhost:80" is http://localhost/ too, which a browser writes without the port
@@ -316,7 +374,7 @@ func covers(pattern string, u *url.URL) bool {
 	} else if linkPort == "" {
 		linkPort = "80"
 	}
-	if port != "" && !regexp.MustCompile(`^`+glob(port, ".*")+`$`).MatchString(linkPort) {
+	if port != "" && !matches(`^`+glob(port, ".*")+`$`, linkPort) {
 		return false
 	}
 	path = unescape(path)
@@ -328,7 +386,20 @@ func covers(pattern string, u *url.URL) bool {
 		return true
 	}
 	linkPath := strings.ToLower(unescape(dotless(u.EscapedPath())))
-	return regexp.MustCompile(`^/` + glob(path, ".*") + `(?:/.*)?$`).MatchString(linkPath)
+	return matches(`^/`+glob(path, ".*")+`(?:/.*)?$`, linkPath)
+}
+
+// maxPattern bounds a pattern covers will look at. Anything that joins the
+// hub can claim links, and a long enough pattern would take seconds to
+// compile, or more than regexp allows. tabstack keeps claims in
+// storage.sync, which caps an item at 8KB; a real one is a site and a path.
+const maxPattern = 4 << 10
+
+// matches reports whether the expression matches s. One that won't compile
+// matches nothing.
+func matches(expr, s string) bool {
+	re, err := regexp.Compile(expr)
+	return err == nil && re.MatchString(s)
 }
 
 // siteParts splits a pattern's site into its host and port.
