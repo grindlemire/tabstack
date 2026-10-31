@@ -5,8 +5,10 @@ import type { Label } from "./messages";
 import type { Shortcut } from "./shortcuts";
 
 // What's kept in storage.sync, with the defaults for what isn't there yet.
+// searchShortcut is null once it's cleared in Settings, so pages keep the key
+// (Cmd+/ toggles comments in most code editors).
 export interface Settings {
-	searchShortcut: Shortcut;
+	searchShortcut: Shortcut | null;
 	autoSwitch: boolean;
 	includeClosed: boolean;
 	thisWindowOnly: boolean;
