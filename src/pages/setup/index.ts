@@ -82,6 +82,7 @@ for (const button of document.querySelectorAll<HTMLElement>("[data-copy]")) {
 // Why connecting failed, kept until the next try: the page refreshes its
 // status every POLL ms, which would otherwise wipe it.
 let problem = "";
+let heard = false; // the background has answered the poll
 let autoConnected = false;
 let connecting = false; // the poll waits while Allow or Reconnect is under way
 
@@ -150,7 +151,7 @@ async function showKeys() {
 	// setup.html says ⌃⌘→ and ⌃⌘←, the keys on a Mac
 	if (keys.length) $("shortcut-text").textContent = keys.join(" and ");
 	if (!keys.length) {
-		$("keys").textContent = "No shortcut set";
+		$("keys").textContent = "Not set";
 		return;
 	}
 	// "⌃⌘→" is three keys
@@ -174,6 +175,12 @@ async function refresh() {
 		autoConnected = true;
 		status = (await connectProfiles()) ?? status;
 	}
+	// No answer says nothing about the profile, only that the background's
+	// quiet (stopped, or reloading). Once it has answered, what's shown
+	// stays, with any "didn't answer" from Reconnect, rather than falling
+	// back to the setup steps as if the profile had never been set up.
+	if (!status && heard) return;
+	heard ||= !!status;
 	show(status);
 	if (!status) return;
 	profileName.show(status.name);

@@ -21,15 +21,24 @@ const inPopup = new URLSearchParams(location.search).has("popup");
 if (inPopup) document.body.style.width = "560px";
 
 const port = api.runtime.connect({ name: "switcher" });
+// The worker stopped, or tabstack was reloaded: nothing here works without it.
+port.onDisconnect.addListener(() => window.close());
+const post = (message: Message) => {
+	try {
+		port.postMessage(message);
+	} catch {
+		window.close(); // disconnected, and onDisconnect hasn't run yet
+	}
+};
 let committing = false;
 
 const shadow = document.getElementById("root")!.attachShadow({ mode: "open" });
 const switcher = new Switcher(shadow, {
 	onCommit: (message) => {
 		committing = true;
-		port.postMessage(message);
+		post(message);
 	},
-	onCloseTab: (message) => port.postMessage(message),
+	onCloseTab: (message) => post(message),
 	onClose: () => {
 		if (committing) setTimeout(() => window.close(), COMMIT_WAIT);
 		else window.close();
@@ -56,7 +65,7 @@ port.onMessage.addListener(async (msg: PortReply) => {
 		const tabs = new Promise<SearchTabs>((resolve) => (gotTabs = resolve));
 		const elsewhere = new Promise<Elsewhere>((resolve) => (gotMore = resolve));
 		// every window and recently closed tabs, which a cycle's list doesn't have
-		port.postMessage({ type: "search", currentId: switcher.tabs[0]?.id } satisfies Message);
+		post({ type: "search", currentId: switcher.tabs[0]?.id });
 		switcher.load({ tabs: () => tabs, elsewhere: () => elsewhere });
 	} else if (msg.type === "tabs") {
 		gotTabs(msg);
