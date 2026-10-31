@@ -1,14 +1,17 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Releases tabstack for Homebrew. Builds it for macOS and Linux, publishes
 # the builds as a release on the tap (github.com/grindlemire/homebrew-tap),
 # and points the tap's formula at them. Tags live on the tap,
-# not here, so this repo needs none.
+# not here, so this repo needs none; the release notes name the commit.
 #
 #   ./release.sh [-n] <version> [<tap clone>]
 #
-# -n builds the archives and the formula into a temporary folder, and stops
-# there. The tap clone defaults to ~/code/personal/homebrew-tap.
-set -eu
+# -n runs the tests, builds the archives and the formula into a temporary
+# folder, and stops there. Without it, everything's checked before anything's
+# published: this repo is committed, the tap clone is clean and up to date,
+# and the release doesn't exist yet. The tap clone defaults to
+# ~/code/personal/homebrew-tap.
+set -euo pipefail
 
 dry=
 if [ "${1:-}" = -n ]; then
@@ -20,7 +23,25 @@ tap=${2:-$HOME/code/personal/homebrew-tap}
 here=$(cd "$(dirname "$0")" && pwd)
 repo=grindlemire/homebrew-tap
 tag=tabstack-v$v
+die() {
+	echo "release.sh: $*" >&2
+	exit 1
+}
+
+if [ -z "$dry" ]; then
+	[ -z "$(git -C "$here" status --porcelain)" ] || die "commit your changes first"
+	[ -z "$(git -C "$tap" status --porcelain)" ] || die "$tap has changes"
+	git -C "$tap" pull --ff-only
+	[ "$(git -C "$tap" rev-parse HEAD)" = "$(git -C "$tap" rev-parse '@{u}')" ] ||
+		die "$tap has commits that aren't pushed"
+	if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+		die "$tag is already released"
+	fi
+fi
+go -C "$here" test ./...
+commit=$(git -C "$here" rev-parse HEAD)
 out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
 
 build() {
 	mkdir -p "$out/$1"
@@ -88,17 +109,22 @@ end
 EOF
 
 if [ -n "$dry" ]; then
+	trap - EXIT
 	echo "built into $out"
 	exit 0
 fi
 
-gh release create "$tag" --repo "$repo" --title "tabstack $v" \
-	--notes "tabstack $v. Install with: brew install grindlemire/tap/tabstack" \
-	"$out"/tabstack-"$v"-*.tar.gz
+# The formula's committed before the release, so a commit that fails stops
+# it, and pushed after, so it never points at archives that aren't up yet.
 mkdir -p "$tap/Formula"
 cp "$out/tabstack.rb" "$tap/Formula/tabstack.rb"
 git -C "$tap" add Formula/tabstack.rb
 git -C "$tap" commit -m "tabstack $v"
-git -C "$tap" push
-rm -r "$out"
+gh release create "$tag" --repo "$repo" --title "tabstack $v" \
+	--notes "tabstack $v, built from grindlemire/tabstack@$commit. Install with: brew install grindlemire/tap/tabstack" \
+	"$out"/tabstack-"$v"-*.tar.gz || {
+	git -C "$tap" reset -q --hard '@{u}'
+	die "couldn't create the release; the tap is as it was"
+}
+git -C "$tap" push || die "released $tag, but couldn't push the formula: push $tap yourself"
 echo "released tabstack $v: brew install grindlemire/tap/tabstack"
