@@ -3,6 +3,10 @@
 // (cmd/tabstack/tabs.go) has to agree with this one, so both are tested on
 // the same cases (testdata/covers.json).
 
+// Longer claims never match, as in the helper (its maxPattern, in UTF-8 bytes): a huge one would stall the RegExp.
+const maxPattern = 4096;
+const utf8 = new TextEncoder();
+
 // Whether a pattern from "Links that open in this profile" covers a URL.
 // "corp.com" is that site (and www.corp.com), "*.corp.com" adds its
 // subdomains, and a path covers everything under it: "github.com/acme" is
@@ -10,6 +14,7 @@
 // path starting with /g, and "github.com/*/issues" every repo's issues.
 // A port ("localhost:3000") has to match too; without one, any port does.
 export function covers(pattern: string, url: URL): boolean {
+	if (utf8.encode(pattern).length > maxPattern) return false;
 	const [site = "", ...rest] = pattern
 		.trim()
 		.toLowerCase()
