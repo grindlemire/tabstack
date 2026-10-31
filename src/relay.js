@@ -6,6 +6,9 @@
 (() => {
 	const api = globalThis.browser ?? globalThis.chrome;
 
+	// Any script on the page can post this, not just media.js, and nothing
+	// tells them apart. All it does is mark the tab as a call in search (a
+	// microphone, ranked first), so a page that fakes it only moves its own tab.
 	addEventListener("message", (e) => {
 		if (e.source !== window || e.data?.tabstack !== "media") return;
 		try {

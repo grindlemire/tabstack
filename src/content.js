@@ -130,7 +130,8 @@
 	// since the search box is in a closed shadow root, so a site with
 	// single-key shortcuts (Gmail's c, to compose) takes them, and cancels the
 	// letter. Like keydown and keyup, they stop here while the switcher's open.
-	// (Not input: the search box listens for that itself.)
+	// (Not input: the search box listens for that itself, so it stops at the
+	// shadow root, in ensureSwitcher.)
 	for (const type of ["keypress", "beforeinput"]) {
 		listen(window, type, (e) => {
 			if (switcher?.isOpen) e.stopImmediatePropagation();
@@ -148,7 +149,16 @@
 			hostEl = document.createElement("tabstack-overlay");
 			hostEl.tabIndex = -1;
 			hostEl.style.outline = "none";
-			switcher = new TabstackUI.Switcher(hostEl.attachShadow({ mode: "closed" }), {
+			const root = hostEl.attachShadow({ mode: "closed" });
+			// What's typed in search mustn't reach the page. Input and
+			// composition events cross the shadow root, carrying the text, so
+			// they stop at it, once the search box's own listener has run. A
+			// page listening in the capture phase hears them first; nothing
+			// here can stop that.
+			for (const type of ["input", "compositionstart", "compositionupdate", "compositionend"]) {
+				root.addEventListener(type, (e) => e.stopPropagation());
+			}
+			switcher = new TabstackUI.Switcher(root, {
 				popover: true,
 				// profile is set on another profile's tabs (profiles.js)
 				onCommit: (item) =>
