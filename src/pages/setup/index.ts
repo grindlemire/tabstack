@@ -8,12 +8,16 @@
 // need), it shows its connection and settings.
 
 import { api } from "../../shared/api";
-import { type ProfilesStatus, sendMessage } from "../../shared/messages";
+import type { ProfilesStatus } from "../../shared/messages";
+import { $, cssTime, keycaps } from "../page";
+import { connectProfiles, linksEditor, nameEditor, PERMISSIONS, profilesStatus, turnOff } from "../profile";
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const PERMISSIONS: chrome.permissions.Permissions = { permissions: ["nativeMessaging", "contextMenus"] };
 const POLL = 1500; // ms; other profiles connect while this page is open
 const CLOSE_AFTER = 1200; // ms after Done that the page closes itself
+const COPIED_FOR = 1500; // ms that a Copy button says Copied
+// After Done, how long the background has to pass it on, and how often that's checked
+const DONE_WAIT = 3000; // ms
+const DONE_CHECK = 200; // ms
 
 const params = new URLSearchParams(location.search);
 const where = params.get("where");
@@ -36,7 +40,7 @@ if (fromCli) {
 	});
 }
 
-// --- motion (the animations are in setup.html) ---
+// --- motion (the animations are in setup.html and page.css) ---
 
 // Plays an animation on an element from the start, and takes it off once it ends.
 function play(el: HTMLElement, name: string) {
@@ -71,7 +75,7 @@ for (const button of document.querySelectorAll<HTMLElement>("[data-copy]")) {
 		setTimeout(() => {
 			button.textContent = "Copy";
 			button.classList.remove("copied");
-		}, 1500);
+		}, COPIED_FOR);
 	});
 }
 
@@ -81,9 +85,8 @@ let problem = "";
 let autoConnected = false;
 let connecting = false; // the poll waits while Allow or Reconnect is under way
 
-// What the page shows: the "profiles" or "profilesConnect" answer, or null
-// when sending failed. An { ok } answer (no status, or a failed handler) is
-// passed on as it is, as before, and reads as neither granted nor connected.
+// What the page shows: the helper's status, or null when there was none to
+// be had (profile.ts), which reads as neither granted nor connected.
 type Shown = ProfilesStatus | null;
 
 // Which page this is: install's Allow page, the setup steps, or, once this
@@ -154,31 +157,46 @@ async function showKeys() {
 	$("keys").replaceChildren(
 		...keys.map((k) => {
 			const group = Object.assign(document.createElement("span"), { className: "keys" });
-			// a shortcut without + is one or more characters, so match finds something
-			for (const key of k.includes("+") ? k.split("+") : k.match(/[⌃⌥⇧⌘]|[^⌃⌥⇧⌘]+/g)!) {
-				group.append(Object.assign(document.createElement("kbd"), { textContent: key }));
-			}
+			for (const key of keycaps(k)) group.append(Object.assign(document.createElement("kbd"), { textContent: key }));
 			return group;
 		}),
 	);
 }
 
+const profileName = nameEditor($("name"));
+const profileLinks = linksEditor($("links"));
+
 async function refresh() {
 	if (connecting) return;
-	const status = (await sendMessage({ type: "profiles" }).catch(() => null)) as Shown;
+	let status = await profilesStatus();
 	// allowed before, but the helper wasn't registered then: connect now
 	if (fromCli && status?.granted && !status.connected && !autoConnected) {
 		autoConnected = true;
-		show((await sendMessage({ type: "profilesConnect" })) as Shown);
-		return;
+		status = (await connectProfiles()) ?? status;
 	}
 	show(status);
-	if (status && document.activeElement !== $("name")) {
-		$<HTMLInputElement>("name").value = status.name;
-		$<HTMLInputElement>("name").placeholder = status.placeholder;
+	if (!status) return;
+	profileName.show(status.name);
+	$<HTMLInputElement>("name").placeholder = status.placeholder;
+	profileLinks.show(status.claims.join("\n"));
+}
+
+// Allow and Reconnect: the button's busy, and the poll waits, until the
+// background answers. With no answer (it's gone, or connecting threw), the
+// page says so until the poll shows what it finds.
+async function reconnect(button: HTMLButtonElement, line: HTMLElement, text: string) {
+	connecting = true;
+	busy(button, true);
+	setStatus(line, "", text);
+	const status = await connectProfiles();
+	connecting = false;
+	busy(button, false);
+	if (status) {
+		show(status);
+		return;
 	}
-	if (status?.claims && document.activeElement !== $("links"))
-		$<HTMLTextAreaElement>("links").value = status.claims.join("\n");
+	problem = "tabstack's background didn't answer. Reload tabstack on chrome://extensions, then try again.";
+	setStatus(line, "error", problem);
 }
 
 async function connect() {
@@ -192,13 +210,7 @@ async function connect() {
 		return;
 	}
 	problem = "";
-	connecting = true;
-	busy($<HTMLButtonElement>("allow"), true);
-	setStatus($("status"), "", "Connecting…");
-	const status = (await sendMessage({ type: "profilesConnect" })) as Shown;
-	connecting = false;
-	busy($<HTMLButtonElement>("allow"), false);
-	show(status);
+	await reconnect($("allow"), $("status"), "Connecting…");
 }
 
 $("allow").addEventListener("click", connect);
@@ -209,58 +221,33 @@ $("connect-here").addEventListener("click", () => {
 	connect();
 });
 
-$("reconnect").addEventListener("click", async () => {
-	connecting = true;
-	busy($<HTMLButtonElement>("reconnect"), true);
-	setStatus($("manage-status"), "", "Reconnecting…");
-	const status = (await sendMessage({ type: "profilesConnect" })) as Shown;
-	connecting = false;
-	busy($<HTMLButtonElement>("reconnect"), false);
-	show(status);
-});
+$("reconnect").addEventListener("click", () => reconnect($("reconnect"), $("manage-status"), "Reconnecting…"));
 
-// like "Turn off profile features" in the popup; back to the setup steps
+// as "Turn off profile features" in the popup, whose offer comes back; back
+// to the setup steps
 $("turn-off").addEventListener("click", async () => {
-	await api.permissions.remove(PERMISSIONS);
-	await api.storage.sync.set({ profilesAdHidden: true });
+	await turnOff();
 	refresh();
 });
 
-const saveName = () => api.storage.sync.set({ profileName: $<HTMLInputElement>("name").value.trim() });
-const saveLinks = () =>
-	api.storage.sync.set({
-		profileClaims: $<HTMLTextAreaElement>("links")
-			.value.split("\n")
-			.map((l) => l.trim())
-			.filter(Boolean),
-	});
-
-let nameTimer: ReturnType<typeof setTimeout> | 0 = 0;
-$("name").addEventListener("input", () => {
-	clearTimeout(nameTimer);
-	nameTimer = setTimeout(saveName, 300);
-});
 $("name").addEventListener("keydown", (e) => {
 	if (e.key === "Enter" && run) finish();
 });
-$("links").addEventListener("change", saveLinks);
 
 // Saves what's on the page and tells tabstack install this profile is
 // set up, so it moves on to the next one.
 async function finish() {
 	if ($<HTMLButtonElement>("done").disabled) return;
-	clearTimeout(nameTimer);
 	busy($<HTMLButtonElement>("done"), true);
-	await Promise.all([saveName(), saveLinks()]);
+	await Promise.all([profileName.save(), profileLinks.save()]);
 	await api.storage.local.set({ setupDone: run });
 	// The background passes it on to install. This page is read from disk
 	// fresh, but the background keeps running the code it started with, so
 	// after an update it may not know to: check that it took.
 	let took = false;
-	for (let i = 0; i < 15 && !took; i++) {
-		await new Promise((r) => setTimeout(r, 200));
-		const status = (await sendMessage({ type: "profiles" }).catch(() => null)) as Shown;
-		took = status?.done === run;
+	for (let waited = 0; waited < DONE_WAIT && !took; waited += DONE_CHECK) {
+		await new Promise((r) => setTimeout(r, DONE_CHECK));
+		took = (await profilesStatus())?.done === run;
 	}
 	busy($<HTMLButtonElement>("done"), false);
 	setStatus(
@@ -276,7 +263,7 @@ async function finish() {
 	$("done").classList.add("success");
 	$("done").textContent = "Saved";
 	$<HTMLButtonElement>("done").disabled = true;
-	setTimeout(() => document.body.classList.add("closing"), CLOSE_AFTER - 300);
+	setTimeout(() => document.body.classList.add("closing"), CLOSE_AFTER - cssTime("--closing"));
 	// this page is a tab of its own, so getCurrent finds it
 	setTimeout(async () => api.tabs.remove((await api.tabs.getCurrent())!.id!), CLOSE_AFTER);
 }
