@@ -413,3 +413,22 @@ func TestSaveHostManifestConcurrently(t *testing.T) {
 		t.Errorf("registration's mode = %v, want 0644, for the browser to read", info.Mode())
 	}
 }
+
+// Chrome writes some permissions as objects (a settings override, say). One
+// in another extension's list, or tabstack's own, or any other entry this
+// can't read, doesn't hide tabstack.
+func TestFindTabstackOddEntries(t *testing.T) {
+	dir := t.TempDir()
+	writeJSON(t, filepath.Join(dir, "Extensions", storeID, "1.0.0_0", "manifest.json"), map[string]any{"name": extensionName})
+	override := map[string]any{"settings_override": map[string]any{"homepage": "https://example.com"}}
+	writeJSON(t, filepath.Join(dir, "Secure Preferences"), map[string]any{"extensions": map[string]any{"settings": map[string]any{
+		lookalikeID:                        map[string]any{"path": "x", "location": 1, "active_permissions": map[string]any{"api": []any{"tabs", override}}},
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": map[string]any{"location": "unpacked", "state": []int{1}},
+		"cccccccccccccccccccccccccccccccc": "not an object",
+		storeID: map[string]any{"path": storeID + "/1.0.0_0", "location": 1,
+			"active_permissions": map[string]any{"api": []any{override, "nativeMessaging", 5}}},
+	}}})
+	if id, granted := findTabstack(dir); id != storeID || !granted {
+		t.Errorf("findTabstack = %q, %v; want %q, true", id, granted, storeID)
+	}
+}

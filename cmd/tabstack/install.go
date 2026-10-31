@@ -182,8 +182,28 @@ type extensionSettings struct {
 	// What the extension has now. Not granted_permissions: Chrome keeps a
 	// permission there after it's removed, so asking again needs no prompt.
 	Active struct {
-		API []string `json:"api"`
+		API apiList `json:"api"`
 	} `json:"active_permissions"`
+}
+
+// apiList is an extension's API permissions, by name. Chrome writes some as
+// objects instead (a settings override, say), which are none tabstack asks
+// for, so they're left out.
+type apiList []string
+
+func (l *apiList) UnmarshalJSON(b []byte) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(b, &items); err != nil {
+		return err
+	}
+	*l = nil
+	for _, item := range items {
+		var name string
+		if json.Unmarshal(item, &name) == nil {
+			*l = append(*l, name)
+		}
+	}
+	return nil
 }
 
 // findTabstack looks for an enabled tabstack in a profile's preferences
@@ -200,14 +220,18 @@ func findTabstack(profileDir string) (id string, granted bool) {
 		if err != nil {
 			continue
 		}
+		// each extension read on its own, so one Chrome wrote in a way this
+		// doesn't expect can't hide tabstack
 		var prefs struct {
 			Extensions struct {
-				Settings map[string]extensionSettings `json:"settings"`
+				Settings map[string]json.RawMessage `json:"settings"`
 			} `json:"extensions"`
 		}
-		if json.Unmarshal(raw, &prefs) == nil {
-			for k, v := range prefs.Extensions.Settings {
-				settings[k] = v
+		json.Unmarshal(raw, &prefs)
+		for k, v := range prefs.Extensions.Settings {
+			var s extensionSettings
+			if json.Unmarshal(v, &s) == nil {
+				settings[k] = s
 			}
 		}
 	}
