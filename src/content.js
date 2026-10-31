@@ -9,12 +9,16 @@
 	const SHOW_DELAY = 120; // a quick tap switches without flashing the UI
 
 	// A newer copy of this script (extension reload, or injection into a tab
-	// that was already open) tells older copies to stand down.
-	const TAKEOVER = "tabstack:takeover";
-	document.dispatchEvent(new CustomEvent(TAKEOVER));
+	// that was already open) tells older copies to stand down. Copies share
+	// this isolated world's global, which the page can't reach, as it could a
+	// DOM event; a copy orphaned into another world stops itself (alive()).
+	globalThis.tabstackTakeover?.();
+	globalThis.tabstackTakeover = teardown;
 	const controller = new AbortController();
+	// Only the browser's own input counts: the page can dispatch keys and
+	// pointer events too, and use them to switch or close any tab.
 	const listen = (target, type, fn, capture = true) =>
-		target.addEventListener(type, fn, { capture, signal: controller.signal });
+		target.addEventListener(type, (e) => e.isTrusted && fn(e), { capture, signal: controller.signal });
 	let dead = false;
 	let switcher = null;
 	let hostEl = null;
@@ -42,8 +46,6 @@
 			teardown();
 		}
 	}
-
-	listen(document, TAKEOVER, teardown, false);
 
 	let settings = DEFAULTS;
 	loadSettings().then((s) => (settings = s));
