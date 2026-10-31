@@ -113,16 +113,19 @@ function syncModifiers(e: KeyboardEvent) {
 
 listen(window, "keydown", (e) => {
 	if (!alive()) return;
+	// the page closed or removed the dialog the overlay went into
+	// (overlayParent): an open switcher no one can see mustn't take keys
+	if (switcher?.isOpen && !hostEl!.checkVisibility()) switcher.close();
 	hear(e);
 	syncModifiers(e);
 	if (e.key in MODIFIERS) modDownAt[e.key] = Date.now();
 
-	// null once it's cleared in Settings: no search key on pages
-	const search = settings.searchShortcut;
+	// off once it's cleared in Settings: no search key on pages
+	const { searchShortcut: search, searchOnPage: on } = settings;
 	const searchKey =
-		matches(e, search) ||
+		matches(e, search, on) ||
 		// while cycling, the search key works with the switch modifier still held
-		(switcher?.isOpen && switcher.mode === "cycle" && e.code === search?.code);
+		(on && switcher?.isOpen && switcher.mode === "cycle" && e.code === search.code);
 	if (searchKey) {
 		e.preventDefault();
 		e.stopImmediatePropagation();
@@ -209,9 +212,19 @@ function takeFocusFromIframe() {
 
 function show() {
 	clearTimeout(showTimer);
-	if (!switcher!.isOpen || switcher!.panel.matches(":popover-open")) return;
+	if (!switcher!.isOpen) return;
+	// The page closed or removed the dialog the overlay went into since it
+	// was placed; a popover there is hidden, or would throw on showing, so
+	// it goes where it can be seen (moving it hides it, if it's showing).
+	if (!hostEl!.checkVisibility()) placeIn(overlayParent(), hostEl!);
+	if (switcher!.panel.matches(":popover-open")) return;
 	const shownAt = Date.now();
-	switcher!.panel.showPopover();
+	try {
+		switcher!.panel.showPopover();
+	} catch {
+		switcher!.close();
+		return;
+	}
 	requestAnimationFrame(() => report({ paintMs: Date.now() - shownAt }));
 }
 
@@ -226,6 +239,11 @@ function hide() {
 	prevFocus = null;
 }
 
+// Presses since a cycle started waiting for its tabs. Those that come while
+// it waits are counted, not sent for tabs of their own, and move it on once
+// it opens, as they would have had it been open.
+let presses = 0;
+
 async function onCycle(msg: CycleMessage) {
 	const s = ensureSwitcher();
 	if (s.isOpen) {
@@ -234,12 +252,24 @@ async function onCycle(msg: CycleMessage) {
 		show();
 		return;
 	}
+	if (presses) {
+		presses++;
+		return;
+	}
 
 	if (msg.modifier) modifier = msg.modifier;
 	s.switchCode = msg.switchCode ?? s.switchCode;
 	timing = { ...msg.timing, pageAt: Date.now() };
-	s.open("cycle", msg.tabs ?? answered(await send({ type: "tabs" })) ?? []);
+	presses = 1;
+	const tabs = msg.tabs ?? answered(await send({ type: "tabs" })) ?? [];
+	const again = presses - 1;
+	presses = 0;
+	// hidden, or orphaned by an extension reload, while it waited, or
+	// search opened meanwhile
+	if (!alive() || document.hidden || s.isOpen) return;
+	s.open("cycle", tabs);
 	if (msg.selected != null) s.select(msg.selected);
+	if (again) s.move(again);
 	send({ type: "open" });
 
 	// This frame never saw the modifier go down when we were switched to
@@ -264,11 +294,13 @@ async function onCycle(msg: CycleMessage) {
 		unheard = true;
 		return;
 	}
-	// An iframe without relay.ts (about:blank ones) never passes the
-	// release on, and it may have come before focus moved up here; the
-	// page's next input carries the modifier's state.
+	// An iframe relay.ts can't reach (data: and blob: ones, or one that
+	// loaded before it) never passes the release on, and it may have come
+	// before focus moved up here; the page's next input carries the
+	// modifier's state.
 	if (inIframe) unheard = true;
-	showTimer = setTimeout(show, SHOW_DELAY);
+	if (again) show();
+	else showTimer = setTimeout(show, SHOW_DELAY);
 }
 
 // The modifier came up, here or (relayed) in an iframe.
@@ -399,7 +431,12 @@ function showToast({ id, text, action, mark }: ToastMessage) {
 	box.append(label, go, dismiss);
 	root.append(box);
 	placeIn(overlayParent(), toastEl);
-	box.showPopover();
+	try {
+		box.showPopover();
+	} catch {
+		hideToast();
+		return;
+	}
 	// it stays while the pointer's on it
 	const wait = () => {
 		toastTimer = setTimeout(hideToast, TOAST_FOR);
@@ -422,6 +459,13 @@ function onMessage(
 	sendResponse({ ok: true });
 }
 api.runtime.onMessage.addListener(onMessage);
+
+// A new document has no switcher open, whatever the background last heard
+// from this tab. A prerendered one isn't this tab's page until it's shown.
+// (TypeScript's DOM types don't have prerendering yet.)
+if ((document as Document & { prerendering?: boolean }).prerendering)
+	document.addEventListener("prerenderingchange", () => send({ type: "started" }), { once: true });
+else send({ type: "started" });
 
 // Recover from a missed keyup: pointer events carry the modifier state.
 listen(window, "pointermove", (e) => {
