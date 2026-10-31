@@ -24,9 +24,9 @@ describe("matches", () => {
 		expect(matches(key("Slash", "/", { metaKey: true, altKey: true }), cmdSlash)).toBe(false);
 	});
 
-	test("a cleared shortcut matches nothing", () => {
-		expect(matches(key("Slash", "/", { metaKey: true }), null)).toBe(false);
-		expect(matches(key("KeyA", "a"), null)).toBe(false);
+	test("one turned off matches nothing", () => {
+		expect(matches(key("Slash", "/", { metaKey: true }), cmdSlash, false)).toBe(false);
+		expect(matches(key("Slash", "/", { metaKey: true }), cmdSlash, true)).toBe(true);
 	});
 });
 

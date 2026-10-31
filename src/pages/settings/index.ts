@@ -72,6 +72,8 @@ function note(text: string, error = false) {
 	if (text && text !== was) play($("note"), "appear");
 }
 
+const KEY_STAGGER = 45; // ms between the keys of a changed shortcut popping in
+
 // Each key of a shortcut gets its own keycap. A shortcut that just changed
 // pops in a key at a time. With none, it's "Not set", in red, or "Off" for one
 // that was turned off on purpose.
@@ -89,7 +91,7 @@ function showKeys(el: HTMLElement, shortcut: string, { off = false } = {}) {
 			const kbd = Object.assign(document.createElement("kbd"), { textContent: key });
 			if (changed) {
 				kbd.classList.add("pop");
-				kbd.style.animationDelay = `${i * 45}ms`;
+				kbd.style.animationDelay = `${i * KEY_STAGGER}ms`;
 			}
 			return kbd;
 		}),
@@ -98,7 +100,7 @@ function showKeys(el: HTMLElement, shortcut: string, { off = false } = {}) {
 
 // --- recording a shortcut ---
 
-let recording: { kbd: HTMLElement; save: (s: Shortcut) => Promise<unknown> } | null = null; // { kbd, save }
+let recording: { kbd: HTMLElement; save: (s: Shortcut) => Promise<unknown> } | null = null;
 
 function record(kbd: HTMLElement, save: (s: Shortcut) => Promise<unknown>) {
 	stopRecording();
@@ -161,17 +163,17 @@ function bindCommand(name: string, id: string) {
 bindCommand("switch", "switch");
 bindCommand("search", "find");
 
+// Off is searchOnPage: false, beside the shortcut (settings.ts).
 $("search-change").addEventListener("click", () =>
-	record($("search-key"), (s) => api.storage.sync.set({ searchShortcut: s })),
+	record($("search-key"), (s) => api.storage.sync.set({ searchShortcut: s, searchOnPage: true })),
 );
 $("search-reset").addEventListener("click", async () => {
-	await api.storage.sync.remove("searchShortcut");
+	await api.storage.sync.remove(["searchShortcut", "searchOnPage"]);
 	refresh();
 });
-// stored as null, so the default doesn't come back in its place
 $("search-clear").addEventListener("click", async () => {
 	stopRecording();
-	await api.storage.sync.set({ searchShortcut: null });
+	await api.storage.sync.set({ searchOnPage: false });
 	refresh();
 });
 
@@ -193,9 +195,10 @@ async function refresh() {
 	if (!switchKey && !recording && !$("note").textContent) {
 		note("Another extension or the browser already uses this shortcut. Choose a different one.", true);
 	}
-	showKeys($("search-key"), s.searchShortcut ? format(s.searchShortcut) : "", { off: true });
-	$("search-reset").hidden = JSON.stringify(s.searchShortcut) === JSON.stringify(DEFAULTS.searchShortcut);
-	$("search-clear").hidden = !s.searchShortcut;
+	showKeys($("search-key"), s.searchOnPage ? format(s.searchShortcut) : "", { off: true });
+	$("search-reset").hidden =
+		s.searchOnPage && JSON.stringify(s.searchShortcut) === JSON.stringify(DEFAULTS.searchShortcut);
+	$("search-clear").hidden = !s.searchOnPage;
 	$<HTMLInputElement>("auto-switch").checked = s.autoSwitch;
 	$<HTMLInputElement>("include-closed").checked = s.includeClosed;
 	$<HTMLInputElement>("this-window-only").checked = s.thisWindowOnly;
@@ -336,7 +339,8 @@ const switchable = () => peers.length > 1;
 
 // Up to four across, in as few rows as that takes, with the rows as even as
 // they'll go: five are three and two, seven four and three, nine three by three.
-const acrossFor = (n: number) => Math.ceil(n / Math.ceil(n / 4));
+const MOST_ACROSS = 4;
+const acrossFor = (n: number) => Math.ceil(n / Math.ceil(n / MOST_ACROSS));
 const across = () => Number($("peers").dataset.across) || 1;
 
 // Redrawn only when something changed, or every poll would lose the
