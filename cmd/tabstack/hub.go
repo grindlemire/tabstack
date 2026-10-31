@@ -5,12 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -19,33 +18,11 @@ import (
 // writeTimeout keeps a helper that stopped reading from holding up the hub.
 const writeTimeout = time.Second
 
-// hub routes messages between the helpers of one browser's profiles, one
-// connection per profile. It knows nothing about what the profiles say to
-// each other; it only tracks who's connected and forwards. Messages are JSON
-// values, one per line.
-//
-// From a profile:
-//
-//	{"type":"hello","version":"1.2.0","binary":"<file>"}         the helper passing its messages on, first thing
-//	{"type":"state","profile":"<id>","windows":2,"info":{...}}  joined, or something about it changed
-//	{"type":"send","to":"<id>","body":{...}}                     for one profile; "*" for every other one
-//
-// To a profile:
-//
-//	{"type":"peers","version":"1.2.0","peers":[{"profile":"<id>","windows":2,"version":"1.2.0","info":{...}}, ...]}
-//	    everyone connected, itself included, and the hub's version
-//	{"type":"msg","from":"<id>","body":{...}}
-//	{"type":"reconnect"}  a new helper is installed: connect again, so the browser starts it
-//
-// peers goes out to everyone whenever a profile joins, leaves or changes.
-//
-// The command line (tabstack install, list and the rest) watches who's
-// connected without joining, and can send profiles commands, which arrive
-// from "cli-<n>", where answers to it go:
-//
-//	{"type":"watch"}  answered with peers, now and on every change
+// hub routes messages between the helpers of one browser's profiles; what
+// they send it is in protocol.go.
 type hub struct {
 	lock *os.File // held while this helper is the hub; closing it would let another take over
+	exe  string   // this helper's file, by a path that lasts: watched for a new build
 
 	mu    sync.Mutex
 	peers map[*peer]bool
@@ -62,26 +39,6 @@ type peer struct {
 	version string // of its helper
 	binary  string // its helper's file (fileID)
 	asked   string // the file it was last asked to move to
-}
-
-type message struct {
-	Type    string          `json:"type"`
-	Profile string          `json:"profile,omitempty"`
-	Windows int             `json:"windows,omitempty"`
-	Info    json.RawMessage `json:"info,omitempty"`
-	To      string          `json:"to,omitempty"`
-	From    string          `json:"from,omitempty"`
-	Body    json.RawMessage `json:"body,omitempty"`
-	Peers   []peerInfo      `json:"peers,omitempty"`
-	Version string          `json:"version,omitempty"`
-	Binary  string          `json:"binary,omitempty"`
-}
-
-type peerInfo struct {
-	Profile string          `json:"profile"`
-	Windows int             `json:"windows"`
-	Version string          `json:"version,omitempty"`
-	Info    json.RawMessage `json:"info,omitempty"`
 }
 
 func (h *hub) serve(ln net.Listener) {
@@ -150,26 +107,25 @@ func (h *hub) announce() {
 
 func (h *hub) peerList() message {
 	list := []peerInfo{}
-	for _, p := range h.sorted() {
-		list = append(list, peerInfo{Profile: p.profile, Windows: p.windows, Version: p.version, Info: p.info})
+	for p := range h.peers {
+		if p.profile != "" {
+			list = append(list, peerInfo{Profile: p.profile, Windows: p.windows, Version: p.version, Info: profileInfo{raw: p.info}})
+		}
 	}
-	return message{Type: "peers", Version: version, Peers: list}
+	// in a fixed order, which the extension cycles through
+	slices.SortFunc(list, func(a, b peerInfo) int { return strings.Compare(a.Profile, b.Profile) })
+	return message{Type: "peers", Version: version, Path: h.exe, Peers: list}
 }
 
 // forward passes a message on to the profile or watcher it's for, or to
 // every profile but the sender's. Called with h.mu held.
 func (h *hub) forward(from *peer, m message) {
-	out := message{Type: "msg", From: from.profile, Body: m.Body}
-	if from.profile == "" {
-		out.From = from.cli
-	}
-	for _, p := range h.sorted() {
-		if p != from && (m.To == "*" || m.To == p.profile) {
-			h.write(p, out)
-		}
-	}
+	out := message{Type: "msg", From: cmp.Or(from.profile, from.cli), Body: m.Body}
 	for p := range h.peers {
-		if p.cli != "" && p.cli == m.To {
+		if p == from {
+			continue
+		}
+		if p.profile != "" && (m.To == "*" || m.To == p.profile) || p.cli != "" && p.cli == m.To {
 			h.write(p, out)
 		}
 	}
@@ -185,8 +141,8 @@ var exeCheck = 30 * time.Second
 // build is asked, once, to connect again, and the browser starts the new one
 // for it. The profile whose helper is the hub goes too, so the hub moves.
 func (h *hub) watchExe() {
-	path, err := helperPath()
-	if err != nil {
+	path := h.exe
+	if path == "" {
 		return
 	}
 	if d, err := time.ParseDuration(os.Getenv("TABSTACK_TEST_EXE_CHECK")); err == nil {
@@ -240,25 +196,4 @@ func (h *hub) write(p *peer, m message) {
 		log.Printf("hub: writing to %s: %v", cmp.Or(p.profile, p.cli), err)
 		p.conn.Close()
 	}
-}
-
-// newEncoder writes messages as they came. By default an encoder escapes
-// &, < and > in bodies, making them up to six times longer, and a reply the
-// extension sized to fit the browser's limit would no longer fit.
-func newEncoder(w io.Writer) *json.Encoder {
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	return enc
-}
-
-// sorted lists the profiles that have said who they are, in a fixed order.
-func (h *hub) sorted() []*peer {
-	var list []*peer
-	for p := range h.peers {
-		if p.profile != "" {
-			list = append(list, p)
-		}
-	}
-	sort.Slice(list, func(i, j int) bool { return list[i].profile < list[j].profile })
-	return list
 }

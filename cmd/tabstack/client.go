@@ -7,23 +7,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 )
-
-// hubPeer is a connected profile, as a hub lists it.
-type hubPeer struct {
-	Profile string `json:"profile"`
-	Windows int    `json:"windows"`
-	Version string `json:"version"` // of the helper passing its messages on
-	Info    struct {
-		Name   string   `json:"name"`
-		Where  string   `json:"where"` // browser/profile folder, once set up by install
-		Claims []string `json:"claims"`
-		// the install run whose setup page was last finished with Done; missing
-		// altogether from a tabstack too old to say
-		Done *string `json:"done"`
-	} `json:"info"`
-}
 
 // hubClient watches a hub, one per running browser, and sends its profiles
 // commands.
@@ -31,8 +18,9 @@ type hubClient struct {
 	conn    net.Conn
 	enc     *json.Encoder
 	dec     *json.Decoder
-	peers   []hubPeer
+	peers   []peerInfo
 	version string // the hub's
+	path    string // the hub's helper, where it watches for a new build
 }
 
 func dialHub(sock string) (*hubClient, error) {
@@ -40,6 +28,12 @@ func dialHub(sock string) (*hubClient, error) {
 	if err != nil {
 		return nil, err
 	}
+	return watchHub(conn)
+}
+
+// watchHub starts watching the hub on conn, and returns once it's said
+// who's connected.
+func watchHub(conn net.Conn) (*hubClient, error) {
 	c := &hubClient{conn: conn, enc: newEncoder(conn), dec: json.NewDecoder(conn)}
 	conn.SetDeadline(time.Now().Add(time.Second))
 	if err := c.enc.Encode(message{Type: "watch"}); err != nil {
@@ -54,23 +48,14 @@ func dialHub(sock string) (*hubClient, error) {
 	return c, nil
 }
 
-// fromHub is anything the hub sends a watcher.
-type fromHub struct {
-	Type    string          `json:"type"`
-	Peers   []hubPeer       `json:"peers"`
-	Version string          `json:"version"`
-	From    string          `json:"from"`
-	Body    json.RawMessage `json:"body"`
-}
-
 // read takes the hub's next message, keeping up with who's connected.
-func (c *hubClient) read() (fromHub, error) {
-	var m fromHub
+func (c *hubClient) read() (message, error) {
+	var m message
 	if err := c.dec.Decode(&m); err != nil {
 		return m, err
 	}
 	if m.Type == "peers" {
-		c.peers, c.version = m.Peers, m.Version
+		c.peers, c.version, c.path = m.Peers, m.Version, m.Path
 	}
 	return m, nil
 }
@@ -93,7 +78,9 @@ type answer struct {
 
 // ask sends a profile a request, or every profile when to is "*", and
 // gathers the answers until each has answered or the time's up. Profiles
-// match an answer to its request by rid.
+// match an answer to its request by rid. Once the time's up, c reads no
+// more (the decoder keeps the error, and may have stopped part way through
+// a message), so it's the last thing a command asks of a hub.
 func (c *hubClient) ask(to string, body map[string]any, timeout time.Duration) ([]answer, error) {
 	want := 1
 	if to == "*" {
@@ -141,23 +128,39 @@ func (c *hubClient) Close() error {
 	return c.conn.Close()
 }
 
-// liveHubs connects to each running hub. A socket left by a hub that's gone
-// just doesn't answer.
+// liveHubs connects to each running hub, and clears away what hubs that
+// are gone left behind.
 func liveHubs(dir string) []*hubClient {
 	socks, _ := filepath.Glob(filepath.Join(dir, "hub-*.sock"))
 	var live []*hubClient
 	for _, sock := range socks {
-		if c, err := dialHub(sock); err == nil {
+		c, err := dialHub(sock)
+		switch {
+		case err == nil:
 			live = append(live, c)
+		case errors.Is(err, syscall.ECONNREFUSED):
+			removeStale(strings.TrimSuffix(sock, ".sock"))
 		}
 	}
 	return live
 }
 
+// removeStale removes the socket and lock of the hub at base, when no
+// helper holds the lock: nothing's listening, and none is about to.
+func removeStale(base string) {
+	f, err := tryLock(base+".lock", 0)
+	if err != nil || f == nil {
+		return
+	}
+	defer f.Close()
+	os.Remove(base + ".sock")
+	os.Remove(base + ".lock")
+}
+
 // connectedProfiles maps each connected profile that install set up, by
 // where it is, to what it says about itself.
-func connectedProfiles(dir string) map[string]hubPeer {
-	out := map[string]hubPeer{}
+func connectedProfiles(dir string) map[string]peerInfo {
+	out := map[string]peerInfo{}
 	for _, c := range liveHubs(dir) {
 		for _, p := range c.peers {
 			if p.Info.Where != "" {
