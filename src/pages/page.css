@@ -1,0 +1,104 @@
+/* What the settings popup and the setup page share: the colors, keycaps,
+   buttons, fields and status lines, and the motion both use. Each page's own
+   styles, in its HTML, come after and build on these. */
+
+/* System fonts only: tabstack makes no network requests, fonts included. */
+:root {
+	--sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+	--bg: #f5f5f7;
+	--group: #ffffff;
+	--fg: #1d1d1f;
+	/* dark enough for small text on --bg and --group */
+	--muted: #6e6e73;
+	--line: rgba(0, 0, 0, 0.08);
+	--cap-top: #ffffff;
+	--cap-bottom: #f0f0f3;
+	--cap-edge: rgba(0, 0, 0, 0.16);
+	--accent: #3b6cf6;
+	--accent-soft: rgba(59, 108, 246, 0.12);
+	--ok: #1e8e3e;
+	--error: #d93025;
+	color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #18181a;
+		--group: #242427;
+		--fg: #f5f5f7;
+		--muted: #98989d;
+		--line: rgba(255, 255, 255, 0.08);
+		--cap-top: #3a3a3e;
+		--cap-bottom: #2e2e32;
+		--cap-edge: rgba(0, 0, 0, 0.5);
+		--accent: #5b85ff;
+		--accent-soft: rgba(91, 133, 255, 0.16);
+		--ok: #5bd17a;
+		--error: #ff6b5b;
+	}
+}
+
+* { box-sizing: border-box; }
+/* elements laid out with display: flex would show anyway */
+[hidden] { display: none !important; }
+body {
+	margin: 0;
+	font-family: var(--sans);
+	color: var(--fg);
+	background: var(--bg);
+	-webkit-font-smoothing: antialiased;
+}
+
+/* a shortcut, one keycap per key */
+.keys { display: inline-flex; gap: 3px; }
+.keys kbd {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 22px;
+	height: 22px;
+	padding: 0 5px;
+	font: 500 12px/1 var(--sans);
+	color: var(--fg);
+	background: linear-gradient(var(--cap-top), var(--cap-bottom));
+	border-radius: 5px;
+	box-shadow: 0 0 0 0.5px var(--cap-edge), 0 1px 0 var(--cap-edge);
+}
+
+/* each page sizes and fills its buttons */
+button {
+	font: inherit;
+	font-weight: 500;
+	color: var(--accent);
+	border: 0;
+	cursor: pointer;
+}
+button:focus-visible { outline: 2px solid var(--accent); }
+
+/* text fields: the profile's name, and its links */
+input[type="text"], textarea {
+	font: inherit;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--line);
+	outline: none;
+}
+input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
+
+/* status lines: green once it worked, red when it didn't */
+.status.ok { color: var(--ok); }
+:is(.status, .note).error { color: var(--error); }
+
+/* each page's opening rise, by as far as it sets (--rise) */
+@keyframes rise { from { opacity: 0; transform: translateY(var(--rise, 4px)); } }
+
+/* words or a row that come and go */
+.appear { animation: appear 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes appear { from { opacity: 0; transform: translateY(-4px); } }
+
+/* something that won't do shakes, over whatever else it's playing */
+.shake { animation: shake 0.34s cubic-bezier(0.36, 0.07, 0.19, 0.97) both !important; }
+@keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+
+@media (prefers-reduced-motion: reduce) {
+	.appear, .shake { animation: none !important; }
+}
