@@ -135,16 +135,31 @@ The helper is Go, in `cmd/tabstack/`.
 
 ## Development
 
-To load your copy of `src/` in place of the store version:
+The extension is TypeScript, in `src/`, bundled with [Bun](https://bun.sh) into one plain script for each part (`scripts/build.ts`). It has no runtime dependencies; `bun install` only fetches the build tools. Install Bun, then:
 
-- **Chrome.** Open `chrome://extensions`, turn on Developer mode, click "Load unpacked" and pick `src/`.
-- **Firefox and Zen** (128 or later). Run `bun build.mjs`, open `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on" and pick `dist/firefox/manifest.json`.
+```sh
+bun install
+bun run dev
+```
+
+`bun run dev` builds the extension into `dist/chrome/` and `dist/firefox/`, and builds them again whenever something in `src/` changes. To load your build in place of the store version:
+
+- **Chrome.** Open `chrome://extensions`, turn on Developer mode, click "Load unpacked" and pick `dist/chrome/`. After a rebuild, click the reload button on tabstack's card.
+- **Firefox and Zen** (128 or later). Open `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on" and pick `dist/firefox/manifest.json`. After a rebuild, click Reload.
+
+Before sending a change:
+
+| Command | What it does |
+| --- | --- |
+| `bun run check` | Type-checks with TypeScript |
+| `bun run lint` | Lints and checks formatting with Biome; `bun run format` fixes the formatting |
+| `bun run test` | Runs the tests |
 
 To work on the helper, run `go test ./...` and `go build` in `cmd/tabstack/`, then `./tabstack install` to register your build.
 
 ### Releasing
 
-- **Extension.** Bump `version` in `src/manifest.json`, run `bun build.mjs`, and upload the two zips it writes to `dist/`. The listing text is in `store/listing.md`.
+- **Extension.** Bump `version` in `src/manifest.json` and run `bun run build`. It writes `tabstack-<version>-chrome.zip` and `tabstack-<version>-firefox.zip` to `dist/`; upload each to its store. The listing text is in `store/listing.md`.
 - **Helper.** Run `cmd/tabstack/release.sh <version>`. It builds for macOS and Linux, publishes a release on [grindlemire/homebrew-tap](https://github.com/grindlemire/homebrew-tap), and points the formula at it. `-n` stops after building.
 
 ## License
