@@ -1,5 +1,5 @@
-// The icons a profile's mark can use (settings.js), drawn as the toolbar
-// icon (background.js) and over search (ui.js). They're from Phosphor,
+// The icons a profile's mark can use (pages/settings), drawn as the toolbar
+// icon (background) and over search (ui). They're from Phosphor,
 // picked for reading at 16px: solid shapes from its fill weight, and for
 // symbols that fill would knock out of a box (code, a terminal prompt),
 // the bare symbol from its bold weight. Each is one SVG path on a
@@ -30,7 +30,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-globalThis.TabstackIcons = {
+// biome-ignore format: generated, one icon to a line
+export const ICONS: Record<string, string> = {
 	circle: "M232,128A104,104,0,1,1,128,24,104.13,104.13,0,0,1,232,128Z", // circle/fill
 	square: "M224,48V208a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32H208A16,16,0,0,1,224,48Z", // square/fill
 	triangle: "M236.78,211.81A24.34,24.34,0,0,1,215.45,224H40.55a24.34,24.34,0,0,1-21.33-12.19,23.51,23.51,0,0,1,0-23.72L106.65,36.22a24.76,24.76,0,0,1,42.7,0L236.8,188.09A23.51,23.51,0,0,1,236.78,211.81Z", // triangle/fill
