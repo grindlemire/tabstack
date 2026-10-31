@@ -37,8 +37,8 @@ const CALL_PAGES =
 let stack = []; // tab ids, most recent first
 const inCall = new Map(); // tab id -> ids of its frames using the microphone or camera
 const thumbs = new Map(); // tab id -> data URL
-const savedThumbs = new Map(); // page URL -> data URL, from earlier sessions
-let savedIndex = []; // page URLs with a saved thumbnail, most recent first
+const savedThumbs = new Map(); // page address (savedKey) -> data URL, from earlier sessions
+let savedIndex = []; // page addresses with a saved thumbnail, most recent first
 const icons = new Map(); // icon key -> data URL, or "" when there's none
 const iconsLoading = new Set();
 const overlayOpen = new Set(); // tab ids showing the switcher
@@ -80,7 +80,7 @@ async function load() {
 
 	// Chrome can only capture the tab on screen, so tabs restored at startup
 	// show the picture from their last visit until they're seen again.
-	({ savedIndex = [] } = await api.storage.local.get("savedIndex"));
+	savedIndex = (await savedStore("readonly", (store) => store.get(SAVED_INDEX)).catch(() => null))?.result ?? [];
 	await loadSaved(tabs.filter((t) => !thumbs.has(t.id)).map((t) => t.url));
 	if (api.tabs.captureTab) captureInBackground(tabs);
 	for (const tab of tabs) iconFor(tab); // fetch any that are missing
@@ -113,8 +113,11 @@ function forget(tabId) {
 }
 
 // A frame's microphone or camera turned on or off (media.js, by way of relay.js).
+// The page itself can post this signal (relay.js), as often as it likes, so
+// it's only written down when it changes something.
 function onMedia(tabId, frameId, live) {
 	const frames = inCall.get(tabId) ?? new Set();
+	if (frames.has(frameId) === live) return;
 	if (live) frames.add(frameId);
 	else frames.delete(frameId);
 	if (frames.size) inCall.set(tabId, frames);
@@ -168,6 +171,12 @@ api.tabs.onUpdated.addListener(async (tabId, change, tab) => {
 
 api.runtime.onInstalled.addListener(async () => {
 	checkShortcut();
+	// Before 1.2, saved thumbnails were kept in storage.local, where content
+	// scripts can read them. They're taken again as tabs are seen.
+	api.storage.local.get(null).then((all) => {
+		const old = Object.keys(all).filter((k) => k.startsWith("saved:") || k === "savedIndex");
+		if (old.length) api.storage.local.remove(old);
+	});
 	// Chrome doesn't inject content scripts into tabs that were already open.
 	const tabs = await api.tabs.query({ url: ["http://*/*", "https://*/*"] });
 	for (const tab of tabs) {
@@ -264,19 +273,55 @@ async function captureInBackground(tabs) {
 	}
 }
 
+// Thumbnails kept across restarts are pictures of where you've been, so they
+// go in the background's own IndexedDB, which content scripts can't reach, as
+// they can storage.local. They're kept by the page's address without its
+// query or fragment, which can carry search terms and tokens.
+const SAVED_INDEX = 0; // savedIndex's key: a number, so no address can be it
+const savedKey = (url) => url?.split(/[?#]/, 1)[0] || null;
+
+let savedDb = null;
+function savedStore(mode, fn) {
+	savedDb ??= new Promise((resolve, reject) => {
+		const req = indexedDB.open("tabstack", 1);
+		req.onupgradeneeded = () => req.result.createObjectStore("saved");
+		req.onsuccess = () => resolve(req.result);
+		req.onerror = () => reject(req.error);
+	}).catch((e) => {
+		savedDb = null; // try again next time
+		throw e;
+	});
+	// settles once the transaction is done, with what fn returned (its requests)
+	return savedDb.then(
+		(db) =>
+			new Promise((resolve, reject) => {
+				const tx = db.transaction("saved", mode);
+				const out = fn(tx.objectStore("saved"));
+				tx.oncomplete = () => resolve(out);
+				tx.onerror = tx.onabort = () => reject(tx.error);
+			}),
+	);
+}
+
 async function loadSaved(urls) {
-	const keys = urls.filter((u) => u && !savedThumbs.has(u) && savedIndex.includes(u)).map((u) => `saved:${u}`);
+	const keys = urls.map(savedKey).filter((k) => k && !savedThumbs.has(k) && savedIndex.includes(k));
 	if (!keys.length) return;
-	for (const [key, value] of Object.entries(await api.storage.local.get(keys))) savedThumbs.set(key.slice(6), value);
+	const found = await savedStore("readonly", (store) => keys.map((k) => [k, store.get(k)])).catch(() => []);
+	for (const [key, req] of found) if (req.result) savedThumbs.set(key, req.result);
 }
 
 function saveByUrl(url, thumb) {
-	savedThumbs.set(url, thumb);
-	savedIndex = [url, ...savedIndex.filter((u) => u !== url)];
+	const key = savedKey(url);
+	if (!key) return;
+	savedThumbs.set(key, thumb);
+	savedIndex = [key, ...savedIndex.filter((k) => k !== key)];
 	const dropped = savedIndex.splice(SAVED_LIMIT);
-	api.storage.local.set({ [`saved:${url}`]: thumb, savedIndex });
-	if (dropped.length) api.storage.local.remove(dropped.map((u) => `saved:${u}`));
-	for (const u of dropped) savedThumbs.delete(u);
+	savedStore("readwrite", (store) => {
+		store.put(thumb, key);
+		store.put(savedIndex, SAVED_INDEX);
+		for (const k of dropped) store.delete(k);
+	}).catch(() => {});
+	for (const k of dropped) savedThumbs.delete(k);
 }
 
 function trimThumbs() {
@@ -419,7 +464,7 @@ async function snapshot(currentId, { forSearch = false, incognito = true } = {})
 			icon: iconFor(t),
 			audible: !!t.audible && !t.mutedInfo?.muted,
 			call: isCall(t),
-			thumb: forSearch ? null : (thumbs.get(t.id) ?? savedThumbs.get(t.url) ?? null),
+			thumb: forSearch ? null : (thumbs.get(t.id) ?? savedThumbs.get(savedKey(t.url)) ?? null),
 		};
 	});
 }
@@ -724,79 +769,134 @@ TabstackShared.watchLabel((l) => {
 });
 api.commands.onChanged?.addListener(checkShortcut);
 
-// --- messages from content scripts and the settings page ---
+// --- messages from content scripts and tabstack's own pages ---
+//
+// Every message, and who may send it: "page" ones come from the content
+// scripts (or tabstack's own pages), "extension" ones only from tabstack's
+// own pages (settings, setup, the switcher). A content script shares its
+// process with the page, so a page that takes that process over can send
+// whatever the content script can. Each is answered with what run returns;
+// the switcher page sends over a port, the rest one message at a time.
+const MESSAGES = {
+	tabs: {
+		from: "page",
+		run: (msg, { tabId }) => (msg.search ? searchTabs(tabId) : snapshot(tabId)),
+	},
+	tabsElsewhere: { from: "page", run: () => searchOthers() },
+	// these three are commits: the switcher page closes when they're done
+	activate: {
+		from: "page",
+		run: async (msg, { tabId }) => {
+			if (tabId != null && jump?.via === tabId && msg.tabId !== jump.via && msg.tabId !== jump.from) jump.to = msg.tabId;
+			await activateItem(msg);
+			return { type: "done" };
+		},
+	},
+	restore: {
+		from: "page",
+		run: async (msg) => {
+			await restoreItem(msg);
+			return { type: "done" };
+		},
+	},
+	switchProfile: {
+		from: "page",
+		run: async (msg) => {
+			await profiles?.switchTo(msg.profile);
+			return { type: "done" };
+		},
+	},
+	// the overlay fills the gap with the tabs that are now on top
+	closeTab: {
+		from: "page",
+		run: async (msg, { tabId }) => {
+			if (msg.profile) return profiles?.closeIn(msg.profile, msg.tabId);
+			return { tabs: await closeTab(msg.tabId, tabId) };
+		},
+	},
+	toastAction: { from: "page", run: (msg) => profiles?.onToastAction(msg.id) },
+	media: {
+		from: "page",
+		run: async (msg, { tabId, frameId }) => {
+			await ready;
+			if (tabId != null) onMedia(tabId, frameId ?? 0, !!msg.live);
+		},
+	},
+	open: {
+		from: "page",
+		run: (msg, { tabId }) => {
+			overlayOpen.add(tabId);
+		},
+	},
+	close: {
+		from: "page",
+		run: (msg, { tabId }) => {
+			overlayOpen.delete(tabId);
+			if (tabId != null && jump?.via === tabId && jump.to == null) jump = null;
+		},
+	},
+	// from an iframe to the top frame, which owns the overlay: only what
+	// relay.js sends, rebuilt, so nothing else rides along
+	relay: {
+		from: "page",
+		run: ({ message: m }, { tabId }) => {
+			let message = null;
+			if (m?.type === "search") message = { type: "search" };
+			else if (m?.type === "modUp" && RELAYED_KEYS.includes(m.key)) message = { type: "modUp", key: m.key };
+			if (message && tabId != null) api.tabs.sendMessage(tabId, message, { frameId: 0 }).catch(() => {});
+		},
+	},
+	// the switcher page's search: this profile's tabs, then other profiles',
+	// so a slow one doesn't hold up these
+	search: {
+		from: "extension",
+		run: async (msg, { reply }) => {
+			reply({ type: "tabs", ...(await searchTabs(msg.currentId)) });
+			const elsewhere = await searchOthers();
+			if (elsewhere.tabs.length || elsewhere.closed.length || elsewhere.profiles.length) return { type: "moreTabs", ...elsewhere };
+		},
+	},
+	profiles: { from: "extension", run: () => profiles?.status() },
+	profilesShared: { from: "extension", run: (msg) => profiles?.setShared(msg.values) },
+	profilesConnect: { from: "extension", run: () => profiles?.reconnect() },
+	checkShortcut: { from: "extension", run: () => checkShortcut() },
+};
+
+const RELAYED_KEYS = ["Meta", "Control", "Alt", "Shift"]; // relay.js's MODIFIERS
+
+// Tabstack's own pages, by where they're from: those open in a tab (setup,
+// the switcher's window) have sender.tab as a content script does. Firefox
+// gives no sender.origin, but does give the page's URL.
+const OWN_URL = api.runtime.getURL("");
+const fromExtension = (sender) => (sender.origin ? `${sender.origin}/` === OWN_URL : !!sender.url?.startsWith(OWN_URL));
+
+// Runs a message, if its sender may send it, and settles with its answer.
+// reply passes on an answer that comes ahead of the last.
+async function handle(msg, sender, reply) {
+	const handler = Object.hasOwn(MESSAGES, msg?.type) ? MESSAGES[msg.type] : null;
+	if (!handler || (handler.from === "extension" && !fromExtension(sender))) return { ok: false };
+	try {
+		return await handler.run(msg, { tabId: sender.tab?.id, frameId: sender.frameId, reply });
+	} catch (e) {
+		console.warn("[tabstack]", msg.type, e);
+		return { ok: false };
+	}
+}
+
+async function searchTabs(currentId) {
+	const [tabs, closed] = await Promise.all([snapshot(currentId, { forSearch: true }), recentlyClosed()]);
+	return { tabs, closed };
+}
 
 api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-	const tabId = sender.tab?.id;
-	switch (msg.type) {
-		case "tabs":
-			if (msg.search) {
-				Promise.all([snapshot(tabId, { forSearch: true }), recentlyClosed()]).then(([tabs, closed]) =>
-					sendResponse({ tabs, closed }),
-				);
-			} else {
-				snapshot(tabId).then(sendResponse);
-			}
-			return true;
-		case "tabsElsewhere":
-			searchOthers().then(sendResponse);
-			return true;
-		case "switchProfile":
-			profiles?.switchTo(msg.profile);
-			break;
-		case "activate":
-			if (jump?.via === tabId && msg.tabId !== jump.via && msg.tabId !== jump.from) jump.to = msg.tabId;
-			activateItem(msg);
-			break;
-		case "restore":
-			restoreItem(msg);
-			break;
-		case "closeTab":
-			if (msg.profile) {
-				profiles?.closeIn(msg.profile, msg.tabId);
-				break;
-			}
-			closeTab(msg.tabId, tabId).then((tabs) => sendResponse({ tabs }));
-			return true;
-		case "profiles":
-			if (!profiles) break;
-			profiles.status().then(sendResponse);
-			return true;
-		case "profilesShared":
-			profiles?.setShared(msg.values);
-			break;
-		case "profilesConnect":
-			if (!profiles) break;
-			profiles.reconnect().then(sendResponse);
-			return true;
-		case "toastAction":
-			profiles?.onToastAction(msg.id);
-			break;
-		case "media":
-			if (tabId != null) ready.then(() => onMedia(tabId, sender.frameId ?? 0, msg.live));
-			break;
-		case "open":
-			overlayOpen.add(tabId);
-			break;
-		case "close":
-			overlayOpen.delete(tabId);
-			if (jump?.via === tabId && jump.to == null) jump = null;
-			break;
-		case "relay":
-			// from an iframe to the top frame, which owns the overlay
-			api.tabs.sendMessage(tabId, msg.message, { frameId: 0 }).catch(() => {});
-			break;
-		case "checkShortcut":
-			checkShortcut();
-			break;
-	}
-	sendResponse({ ok: true });
+	handle(msg, sender, sendResponse).then((answer) => sendResponse(answer ?? { ok: true }));
+	return true;
 });
 
 // --- the switcher popup or window ---
 
 api.runtime.onConnect.addListener((port) => {
-	if (port.name !== "switcher") return;
+	if (port.name !== "switcher" || !fromExtension(port.sender)) return;
 	switcherPort = port;
 	(api.action ?? api.browserAction).setPopup({ popup: "settings.html" });
 	const start = pendingSwitcher;
@@ -808,31 +908,17 @@ api.runtime.onConnect.addListener((port) => {
 	port.onDisconnect.addListener(() => {
 		if (switcherPort === port) switcherPort = null;
 	});
-	port.onMessage.addListener(async (msg) => {
-		if (msg.type === "activate" || msg.type === "restore" || msg.type === "switchProfile") {
-			if (msg.type === "activate") await activateItem(msg);
-			else if (msg.type === "restore") await restoreItem(msg);
-			else await profiles?.switchTo(msg.profile);
-			try {
-				port.postMessage({ type: "done" });
-			} catch {
-				// the window already closed itself
-			}
-		} else if (msg.type === "closeTab") {
-			if (msg.profile) profiles?.closeIn(msg.profile, msg.tabId);
-			else api.tabs.remove(msg.tabId).catch(() => {});
-		} else if (msg.type === "search") {
-			const [tabs, closed] = await Promise.all([snapshot(msg.currentId, { forSearch: true }), recentlyClosed()]);
-			port.postMessage({ type: "tabs", tabs, closed });
-			// other profiles' tabs follow, so a slow one doesn't hold up these
-			const elsewhere = await searchOthers();
-			if (elsewhere.tabs.length || elsewhere.closed.length || elsewhere.profiles.length) {
-				try {
-					port.postMessage({ type: "moreTabs", ...elsewhere });
-				} catch {
-					// closed already
-				}
-			}
+	const post = (message) => {
+		try {
+			port.postMessage(message);
+		} catch {
+			// the window already closed itself
 		}
+	};
+	// The switcher page isn't a tab being switched from, so no tabId: the
+	// tabs it can still reach after a close aren't asked for.
+	port.onMessage.addListener(async (msg) => {
+		const answer = await handle(msg, { ...port.sender, tab: undefined }, post);
+		if (answer?.type) post(answer);
 	});
 });
