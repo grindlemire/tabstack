@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # the packageManager field: bun@<version>
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run lint
+      - run: bun run test
+      - run: bun run build
+
+  helper:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cmd/tabstack
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cmd/tabstack/go.mod
+          # no dependencies, so no go.sum to key a cache on
+          cache: false
+      - run: go vet ./...
+      - run: go test ./...

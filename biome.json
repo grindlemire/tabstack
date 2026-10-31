@@ -1,0 +1,58 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": ["src/**", "scripts/**", "*.json", "!src/*.js"]
+  },
+  "formatter": {
+    "indentStyle": "tab",
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "json": {
+    "formatter": { "indentStyle": "space", "indentWidth": 2 }
+  },
+  "css": {
+    "formatter": { "enabled": false }
+  },
+  "html": {
+    "formatter": { "enabled": false }
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "a11y": {
+        "useAriaPropsForRole": "off",
+        "useButtonType": "off",
+        "useHtmlLang": "off",
+        "useSemanticElements": "off"
+      },
+      "complexity": {
+        "noImportantStyles": "off"
+      },
+      "correctness": {
+        "noInvalidDirectionInLinearGradient": "off"
+      },
+      "style": {
+        "noDescendingSpecificity": "off",
+        "noNonNullAssertion": "off"
+      },
+      "suspicious": {
+        "noConfusingVoidType": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/manifest.json"],
+      "formatter": { "enabled": false }
+    }
+  ],
+  "assist": { "enabled": true }
+}
