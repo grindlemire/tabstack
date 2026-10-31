@@ -6,7 +6,9 @@
 // across profiles, so every copy connects to a native helper (cmd/tabstack/) that
 // passes messages between them. Few people install it, so none of this shows
 // until they do: the permission it needs is optional, asked for from the
-// setup page (setup.html), and without it this file does nothing at all.
+// setup page (setup.html). Without it, or without the helper running, its
+// listeners still wake the worker, since Manifest V3 wants them registered at
+// load, but each returns on its first line.
 // Chrome only; the Firefox build leaves it out.
 
 import { api } from "../shared/api";
@@ -23,9 +25,10 @@ import type {
 	SharedSettings,
 	TabItem,
 } from "../shared/messages";
+import { covers, pageKey } from "./covers";
 
 // What the background lends this module (snapshot and recentlyClosed).
-export interface Hooks {
+interface Hooks {
 	snapshot: (
 		currentId: number | null | undefined,
 		options?: { forSearch?: boolean; incognito?: boolean },
@@ -79,7 +82,7 @@ interface Reply {
 type PeerBody =
 	| Omit<Reply, "from">
 	| { kind: "tabs"; rid: string }
-	| { kind: "find"; rid: string; url: string }
+	| { kind: "find"; rid: string; url?: string }
 	| { kind: "focus"; frame?: Frame | null }
 	| { kind: "activate"; tabId: number; windowId: number; frame?: Frame | null }
 	| { kind: "restore"; sessionId?: string; frame?: Frame | null }
@@ -124,6 +127,11 @@ export function createProfiles() {
 	const TOAST_ACTION_FOR = 30_000;
 	const BOUNDS_DELAY = 250; // let a drag or resize settle before the others follow
 	const RESTART_GAP = 60_000; // ms; restarting to connect is tried once, not in a loop
+	// ms before connecting again to a helper that stopped, doubling each time
+	// it stops without answering. A worker that sleeps in between connects
+	// when it wakes instead (start).
+	const RETRY_FIRST = 1000;
+	const RETRY_MAX = 60_000;
 
 	// Settings every profile shares. Each keeps a copy, and the newest wins.
 	const SHARED_DEFAULTS: SharedSettings = {
@@ -153,6 +161,8 @@ export function createProfiles() {
 	};
 	let shared: SharedState = { values: SHARED_DEFAULTS, at: 0 };
 	let started: Promise<void> | null = null;
+	let retryIn = RETRY_FIRST;
+	let retryTimer: ReturnType<typeof setTimeout> | 0 = 0;
 
 	const pending = new Map<string, { replies: Reply[]; expected: number; done: () => void }>(); // request id -> { replies, expected, done }
 	const exempt = new Map<number, number>(); // tab id -> time until which it isn't moved
@@ -258,23 +268,42 @@ export function createProfiles() {
 		port = p;
 		p.onMessage.addListener(onMessage);
 		p.onDisconnect.addListener(() => {
-			lastError = api.runtime.lastError?.message ?? "the helper stopped";
+			const error = api.runtime.lastError?.message ?? "the helper stopped";
 			if (port !== p) return;
-			port = null;
-			connected = false;
-			peers = [];
-			updateMenus();
-			publishLabel();
+			port = null; // already closed
+			teardown(error);
+			// a helper that isn't installed, or doesn't list this extension,
+			// won't be there on a retry either
+			if (enabled && !/not found|forbidden/i.test(error)) retryLater();
 		});
 		sendState();
 	}
 
-	function disconnect() {
-		port?.disconnect();
+	// Closes the connection, if it's open, and takes the other profiles out
+	// of the menus and the label.
+	function teardown(error = "") {
+		clearTimeout(retryTimer);
+		retryTimer = 0;
+		const p = port;
 		port = null;
+		p?.disconnect();
 		connected = false;
 		peers = [];
-		lastError = "";
+		lastError = error;
+		// what's kept by tab is only kept while connected (start fills tabUrls again)
+		for (const map of [exempt, tabUrls, createdAt]) map.clear();
+		dupeChecked.clear();
+		arriving.clear();
+		updateMenus();
+		publishLabel();
+	}
+
+	function retryLater() {
+		retryTimer = setTimeout(() => {
+			retryTimer = 0;
+			if (enabled && !port) start();
+		}, retryIn);
+		retryIn = Math.min(retryIn * 2, RETRY_MAX);
 	}
 
 	// What this profile shows of itself: its name over search (ui/index.ts), and
@@ -331,6 +360,7 @@ export function createProfiles() {
 		if (msg.type === "peers") {
 			connected = true;
 			lastError = "";
+			retryIn = RETRY_FIRST;
 			peers = msg.peers;
 			for (const p of peers) {
 				const theirs = p.info?.shared;
@@ -355,14 +385,10 @@ export function createProfiles() {
 		port?.postMessage({ type: "send", to, body });
 	}
 
-	// Asks one profile, or every other one ("*"), and settles with what comes
-	// back in time: one answer (or null), or a list of them.
-	function ask(to: "*", body: Sent, timeout?: number): Promise<Reply[]>;
-	function ask(to: string, body: Sent, timeout?: number): Promise<Reply | null>;
-	function ask(to: string, body: Sent, timeout = ASK_TIMEOUT): Promise<Reply[] | Reply | null> {
-		const all = to === "*";
-		const expected = all ? others().length : 1;
-		if (!connected || !expected) return Promise.resolve(all ? [] : null);
+	// Asks every other profile, and settles with the answers that come back in time.
+	function ask(body: Sent): Promise<Reply[]> {
+		const expected = others().length;
+		if (!connected || !expected) return Promise.resolve([]);
 		const rid = crypto.randomUUID();
 		return new Promise((resolve) => {
 			const entry = {
@@ -371,12 +397,12 @@ export function createProfiles() {
 				done() {
 					clearTimeout(timer);
 					pending.delete(rid);
-					resolve(all ? entry.replies : (entry.replies[0] ?? null));
+					resolve(entry.replies);
 				},
 			};
-			const timer = setTimeout(entry.done, timeout);
+			const timer = setTimeout(entry.done, ASK_TIMEOUT);
 			pending.set(rid, entry);
-			post(to, { ...body, rid });
+			post("*", { ...body, rid });
 		});
 	}
 
@@ -471,8 +497,8 @@ export function createProfiles() {
 				await api.storage.sync.set({ profilesAdHidden: false });
 				await api.permissions.remove({ permissions: ["nativeMessaging", "contextMenus"] }).catch(() => {});
 				// at once, without waiting on the permission's removal to be reported
-				disconnect();
-				updateMenus();
+				enabled = false;
+				teardown();
 				return;
 			case "rename":
 				await api.storage.sync.set({ profileName: body.name ?? "" });
@@ -543,6 +569,7 @@ export function createProfiles() {
 
 	let boundsTimer: ReturnType<typeof setTimeout> | 0 = 0;
 	api.windows.onBoundsChanged?.addListener((win) => {
+		if (!port) return;
 		// only the window in front leads; the others moving to match don't,
 		// nor does an incognito one
 		if (!win.focused || win.incognito || !connected || !shared.values.stack) return;
@@ -550,8 +577,14 @@ export function createProfiles() {
 		boundsTimer = setTimeout(async () => post("*", { kind: "bounds", frame: await currentFrame() }), BOUNDS_DELAY);
 	});
 
-	api.windows.onCreated.addListener(() => sendState());
-	api.windows.onRemoved.addListener(() => sendState());
+	api.windows.onCreated.addListener(() => {
+		if (!port) return;
+		sendState();
+	});
+	api.windows.onRemoved.addListener(() => {
+		if (!port) return;
+		sendState();
+	});
 
 	// Hands the turn to the next profile with a window open, or the previous
 	// one, in the order profiles are listed.
@@ -564,6 +597,7 @@ export function createProfiles() {
 	}
 
 	api.commands.onCommand.addListener((command) => {
+		if (!port) return;
 		if (command === "profile-next") cycle(1);
 		else if (command === "profile-prev") cycle(-1);
 	});
@@ -576,6 +610,8 @@ export function createProfiles() {
 		if (!hooks) return { tabs: [], closed: [] };
 		const [tabs, closed] = await Promise.all([
 			hooks.snapshot(null, { forSearch: true, incognito: false }),
+			// needs no such filter: Chrome doesn't keep closed incognito tabs
+			// with the profile's, so the extension is never shown them
 			hooks.recentlyClosed(),
 		]);
 		let answer: SearchTabs = { tabs, closed };
@@ -611,10 +647,10 @@ export function createProfiles() {
 					)
 			: [];
 		if (!shared.values.searchAll) return { tabs, closed, profiles, marks };
-		for (const answer of await ask("*", { kind: "tabs" })) {
-			const label = { profile: answer.from, profileName: nameOf(answer.from) };
-			tabs.push(...(answer.tabs ?? []).map((t) => ({ ...t, ...label })));
-			closed.push(...(answer.closed ?? []).map((t) => ({ ...t, ...label })));
+		for (const answer of await ask({ kind: "tabs" })) {
+			const origin = { profile: answer.from, profileName: nameOf(answer.from) };
+			tabs.push(...(answer.tabs ?? []).map((t) => ({ ...t, ...origin })));
+			closed.push(...(answer.closed ?? []).map((t) => ({ ...t, ...origin })));
 		}
 		return { tabs, closed, profiles, marks };
 	}
@@ -637,37 +673,6 @@ export function createProfiles() {
 	}
 
 	// --- moving links and tabs between profiles ---
-
-	// Whether a pattern from "Links that open in this profile" covers a URL.
-	// "corp.com" is that site (and www.corp.com), "*.corp.com" adds its
-	// subdomains, and a path covers everything under it: "github.com/acme" is
-	// /acme and /acme/…. A * matches anything, so "github.com/g*" covers every
-	// path starting with /g, and "github.com/*/issues" every repo's issues.
-	function covers(pattern: string, url: URL) {
-		const [site, ...rest] = pattern
-			.trim()
-			.toLowerCase()
-			.replace(/^https?:\/\//, "")
-			.split("/");
-		if (!site) return false;
-		const glob = (text: string, star: string) =>
-			text
-				.split("*")
-				.map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
-				.join(star);
-		const sitePattern = site.startsWith("*.")
-			? `(?:[^/]*\\.)?${glob(site.slice(2), "[^/]*")}`
-			: `(?:www\\.)?${glob(site, "[^/]*")}`;
-		// a port in the pattern ("localhost:3000") has to match too
-		const host = (site.includes(":") ? url.host : url.hostname).toLowerCase();
-		if (!new RegExp(`^${sitePattern}$`).test(host)) return false;
-		const path = rest
-			.join("/")
-			.replace(/\/\*?$/, "")
-			.replace(/\/+$/, "");
-		if (!path) return true;
-		return new RegExp(`^/${glob(path, ".*")}(?:/.*)?$`).test(url.pathname.toLowerCase());
-	}
 
 	// The profile a URL belongs to, when that's another one. Links this
 	// profile claims stay here, even when another claims them too.
@@ -777,19 +782,11 @@ export function createProfiles() {
 
 	// --- the same page open in another profile ---
 
-	const normalize = (href: string | undefined) => {
-		try {
-			const url = new URL(href!);
-			url.hash = "";
-			return url.href.replace(/\/$/, "");
-		} catch {
-			return href;
-		}
-	};
-
-	async function findTab(href: string) {
-		const want = normalize(href);
-		const tab = (await shareableTabs()).find((t) => normalize(t.url) === want);
+	// a find with no address finds nothing, not a tab without one
+	async function findTab(href: string | undefined) {
+		const want = pageKey(href);
+		if (!want) return null;
+		const tab = (await shareableTabs()).find((t) => pageKey(t.url) === want);
 		return tab ? { id: tab.id, windowId: tab.windowId } : null;
 	}
 
@@ -802,7 +799,7 @@ export function createProfiles() {
 		if (!connected || !shared.values.dupes || (exempt.get(tab.id!) ?? 0) > Date.now()) return;
 		if (!/^https?:/.test(tab.url ?? "")) return;
 		dupeChecked.add(tab.id!);
-		const hit = (await ask("*", { kind: "find", url: tab.url })).find((a) => a.tab);
+		const hit = (await ask({ kind: "find", url: tab.url })).find((a) => a.tab);
 		if (!hit) return;
 		toast(tab.id!, {
 			text: `Already open in ${nameOf(hit.from)}`,
@@ -815,16 +812,34 @@ export function createProfiles() {
 		});
 	}
 
-	api.tabs.onCreated.addListener((tab) => port && createdAt.set(tab.id!, Date.now()));
+	api.tabs.onCreated.addListener((tab) => {
+		if (!port) return;
+		createdAt.set(tab.id!, Date.now());
+	});
 	api.tabs.onUpdated.addListener((_tabId, change, tab) => {
-		if (!connected) return;
+		if (!port) return;
 		if (change.url) onNavigate(tab, change.url);
 		if (change.status === "complete") checkDupe(tab);
 	});
 	api.tabs.onRemoved.addListener((tabId) => {
+		if (!port) return;
 		for (const map of [exempt, tabUrls, createdAt]) map.delete(tabId);
 		for (const [url, until] of arriving) if (until < Date.now()) arriving.delete(url);
 		dupeChecked.delete(tabId);
+	});
+	// A prerendered page can take its tab's place under a new ID. It's still
+	// the tab it was, with its history, so leaving the site goes back rather
+	// than closing it as a tab opened for the link.
+	api.tabs.onReplaced?.addListener((added, removed) => {
+		if (!port) return;
+		const move = <V>(map: Map<number, V>) => {
+			if (map.has(removed)) map.set(added, map.get(removed)!);
+			map.delete(removed);
+		};
+		move(exempt);
+		move(tabUrls);
+		move(createdAt);
+		if (dupeChecked.delete(removed)) dupeChecked.add(added);
 	});
 
 	// --- notices on the page (content/index.ts) ---
@@ -914,11 +929,11 @@ export function createProfiles() {
 	api.permissions.onRemoved.addListener(async () => {
 		if (await granted()) return;
 		enabled = false;
-		disconnect();
-		publishLabel();
+		teardown();
 	});
 
 	api.storage.onChanged.addListener((changes) => {
+		if (!enabled) return;
 		if (changes.profileMark) {
 			local.mark = (changes.profileMark.newValue as Mark | undefined) ?? null;
 			publishLabel();
@@ -965,7 +980,8 @@ export function createProfiles() {
 
 	// The setup page's "Connect" button, which also retries.
 	async function reconnect() {
-		disconnect();
+		retryIn = RETRY_FIRST;
+		teardown();
 		await start();
 		// the helper answers with the list of profiles, or the port closes
 		for (let i = 0; i < 20 && port && !connected; i++) await new Promise((r) => setTimeout(r, 100));
@@ -977,7 +993,6 @@ export function createProfiles() {
 		status,
 		setShared,
 		reconnect,
-		cycle,
 		switchTo,
 		searchOthers,
 		activateIn,
@@ -986,5 +1001,3 @@ export function createProfiles() {
 		onToastAction,
 	};
 }
-
-export type Profiles = ReturnType<typeof createProfiles>;
