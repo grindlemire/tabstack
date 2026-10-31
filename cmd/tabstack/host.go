@@ -106,18 +106,11 @@ func relay(base string, in io.Reader, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		fromHub := make(chan []byte)
-		go func() {
-			defer close(fromHub)
-			dec := json.NewDecoder(conn)
-			for {
-				var msg json.RawMessage
-				if err := dec.Decode(&msg); err != nil {
-					return
-				}
-				fromHub <- msg
-			}
-		}()
+		// The hub's messages go to the browser from their own goroutine, so
+		// this one blocking on a write to the hub never stops them being read:
+		// the hub, writing to us at the same time, would give up on us.
+		lost := make(chan error, 1)
+		go func() { lost <- toBrowser(conn, out) }()
 
 		err = send(conn, hello)
 		if err == nil && state != nil {
@@ -134,25 +127,38 @@ func relay(base string, in io.Reader, out io.Writer) error {
 					state = msg
 				}
 				err = send(conn, msg)
-			case msg, ok := <-fromHub:
-				if !ok {
-					err = io.EOF
-					break
-				}
-				if len(msg) > maxWrite {
-					log.Printf("dropped a %d-byte message, over the browser's limit", len(msg))
-					break
-				}
-				if err := writeFrame(out, msg); err != nil {
-					conn.Close()
-					return err
-				}
+			case werr := <-lost:
+				lost <- werr // for after the loop
+				err = io.EOF
 			}
 		}
 		conn.Close()
-		for range fromHub {
+		// toBrowser is all that writes to out; the next hub's waits for this
+		// one to stop, so frames never interleave
+		if werr := <-lost; werr != nil {
+			return werr
 		}
 		log.Printf("lost the hub (%v); rejoining", err)
+	}
+}
+
+// toBrowser passes the hub's messages on to the browser until the hub's
+// connection closes, when it returns nil, or writing to the browser fails.
+func toBrowser(conn net.Conn, out io.Writer) error {
+	dec := json.NewDecoder(conn)
+	for {
+		var msg json.RawMessage
+		if err := dec.Decode(&msg); err != nil {
+			return nil
+		}
+		if len(msg) > maxWrite {
+			log.Printf("dropped a %d-byte message, over the browser's limit", len(msg))
+			continue
+		}
+		if err := writeFrame(out, msg); err != nil {
+			conn.Close()
+			return err
+		}
 	}
 }
 

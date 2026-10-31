@@ -231,6 +231,50 @@ func TestHubHandsOver(t *testing.T) {
 	b.expect(t, "msg")
 }
 
+// Two profiles sending each other big messages at once all get through: a
+// helper keeps reading from the hub while it's busy writing to it, so the
+// hub, writing to that helper, never gives up on it.
+func TestCrossTraffic(t *testing.T) {
+	exe, dir := buildHelper(t)
+	a, b := startHelper(t, exe, dir), startHelper(t, exe, dir)
+	a.send(t, state("1", 1))
+	b.send(t, state("2", 1))
+	a.expectPeers(t, "1", "2")
+	b.expectPeers(t, "1", "2")
+
+	const n = 30
+	pad := strings.Repeat("x", 200<<10)
+	for _, s := range []struct {
+		from *helper
+		to   string
+	}{{a, "2"}, {b, "1"}} {
+		// what doesn't get sent doesn't arrive, which is what's checked
+		go func() {
+			for i := range n {
+				msg, _ := json.Marshal(sendTo(s.to, map[string]any{"i": i, "pad": pad}))
+				if writeFrame(s.from.in, msg) != nil {
+					return
+				}
+			}
+		}()
+	}
+	got := map[*helper]int{}
+	for deadline := time.After(10 * time.Second); got[a] < n || got[b] < n; {
+		select {
+		case m := <-a.out:
+			if m["type"] == "msg" {
+				got[a]++
+			}
+		case m := <-b.out:
+			if m["type"] == "msg" {
+				got[b]++
+			}
+		case <-deadline:
+			t.Fatalf("a got %d/%d, b got %d/%d", got[a], n, got[b], n)
+		}
+	}
+}
+
 // A message too big for the browser is dropped rather than sent, since
 // Chrome closes the connection over one.
 func TestDropsOversize(t *testing.T) {
