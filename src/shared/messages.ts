@@ -162,7 +162,7 @@ export interface Timing {
 
 // --- to the background ---
 
-// What relay.js passes on from an iframe to the top frame.
+// What content/relay.ts passes on from an iframe to the top frame.
 export type RelayedMessage = { type: "search" } | { type: "modUp"; key: string };
 
 // "page" ones come from content scripts or tabstack's own pages.
@@ -175,6 +175,7 @@ type PageToBackground =
 	| { type: "closeTab"; tabId: number; profile?: string }
 	| { type: "toastAction"; id: string }
 	| { type: "media"; live: boolean }
+	| { type: "started" }
 	| { type: "open" }
 	| { type: "close" }
 	| { type: "relay"; message: RelayedMessage };
@@ -206,6 +207,7 @@ export interface Results {
 	closeTab: { tabs: TabItem[] } | undefined;
 	toastAction: void;
 	media: void;
+	started: void;
 	open: void;
 	close: void;
 	relay: void;
@@ -257,8 +259,8 @@ export type PortReply = StartMessage | TabsReply | MoreTabs | Done;
 
 // --- in the page ---
 
-// From media.js, in the page's own world, to relay.js, by window.postMessage.
-// Any script on the page can post it.
+// From content/media.ts, in the page's own world, to content/relay.ts, by
+// window.postMessage. Any script on the page can post it.
 export interface MediaSignal {
 	tabstack: "media";
 	live: boolean;
