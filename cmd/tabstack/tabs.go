@@ -375,7 +375,8 @@ func covers(pattern string, u *url.URL) bool {
 	} else if linkPort == "" {
 		linkPort = "80"
 	}
-	if port != "" && !matches(`^`+glob(port, ".*")+`$`, linkPort) {
+	// (?s): a * spans line breaks too, as tabstack's does; only a host's stops at a /
+	if port != "" && !matches(`(?s)^`+glob(port, ".*")+`$`, linkPort) {
 		return false
 	}
 	path = unescape(path)
@@ -387,7 +388,7 @@ func covers(pattern string, u *url.URL) bool {
 		return true
 	}
 	linkPath := strings.ToLower(unescape(dotless(u.EscapedPath())))
-	return matches(`^/`+glob(path, ".*")+`(?:/.*)?$`, linkPath)
+	return matches(`(?s)^/`+glob(path, ".*")+`(?:/.*)?$`, linkPath)
 }
 
 // maxPattern bounds a pattern covers will look at. Anything that joins the
