@@ -596,7 +596,8 @@ func waitForPeer(dir, key string, ready func(peerInfo) bool) (peerInfo, bool) {
 }
 
 // openSetup opens tabstack's setup page in one profile, telling it which
-// profile it's in and what the browser calls it.
+// profile it's in and what the browser calls it, and brings the browser
+// forward, which it can't do itself over the terminal (see activate).
 func openSetup(home string, t target, run string) error {
 	q := url.Values{"where": {t.b.key(t.p)}, "name": {t.p.name}, "run": {run}}
 	page := fmt.Sprintf("chrome-extension://%s/setup.html?%s", t.p.id, q.Encode())
@@ -604,7 +605,11 @@ func openSetup(home string, t target, run string) error {
 	if err != nil {
 		return err
 	}
-	return start(exe, append(t.b.args, "--profile-directory="+t.p.dir, page)...)
+	if err := start(exe, append(t.b.args, "--profile-directory="+t.p.dir, page)...); err != nil {
+		return err
+	}
+	activate(home, t.b.exe)
+	return nil
 }
 
 func findExe(home, exe string) (string, error) {

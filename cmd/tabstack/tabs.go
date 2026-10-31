@@ -197,11 +197,15 @@ func focus(w io.Writer, args []string) error {
 // an app can't bring itself forward over the one you're using, as the
 // browser does for its own window, but the app you're using can ask for it.
 func (s *session) activate(e entry) {
-	if runtime.GOOS != "darwin" || e.b.exe == "" {
+	activate(s.home, e.b.exe)
+}
+
+func activate(home, exe string) {
+	if runtime.GOOS != "darwin" || exe == "" {
 		return
 	}
-	if exe, err := findExe(s.home, e.b.exe); err == nil {
-		if app, _, ok := strings.Cut(exe, ".app/"); ok {
+	if path, err := findExe(home, exe); err == nil {
+		if app, _, ok := strings.Cut(path, ".app/"); ok {
 			start("open", "-a", app+".app")
 		}
 	}
