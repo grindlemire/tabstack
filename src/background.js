@@ -391,9 +391,11 @@ function saveIcons() {
 
 // A cycle gets the few tabs it can reach, with thumbnails. Search gets every
 // tab in every window, without thumbnails, since its rows don't show them.
-async function snapshot(currentId, { forSearch = false } = {}) {
+// Another profile's search leaves out incognito tabs (profiles.js).
+async function snapshot(currentId, { forSearch = false, incognito = true } = {}) {
 	await ready;
 	let tabs = await api.tabs.query({});
+	if (!incognito) tabs = tabs.filter((t) => !t.incognito);
 	const byId = new Map(tabs.map((t) => [t.id, t]));
 	const current = byId.get(currentId);
 	if (settings.thisWindowOnly && !forSearch && current) {
