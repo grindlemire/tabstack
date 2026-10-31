@@ -182,7 +182,8 @@ globalThis.TabstackProfiles = (() => {
 
 	async function sendState() {
 		if (!port) return;
-		const windows = await api.windows.getAll({ windowTypes: ["normal"] });
+		// incognito windows aren't counted: they're not for other profiles to switch to
+		const windows = (await api.windows.getAll({ windowTypes: ["normal"] })).filter((w) => !w.incognito);
 		port?.postMessage({
 			type: "state",
 			profile,
@@ -346,9 +347,17 @@ globalThis.TabstackProfiles = (() => {
 
 	// --- windows ---
 
-	// This profile's most recent window: the one that comes forward.
-	function lastWindow() {
-		return api.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
+	// This profile's most recent window: the one that comes forward. Never an
+	// incognito one: links from other profiles don't open there, switching
+	// profiles doesn't bring it forward, and its place isn't passed on. When
+	// the last focused window is incognito, it's the window of the tab used
+	// most recently.
+	async function lastWindow() {
+		const win = await api.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
+		if (!win?.incognito) return win;
+		const tabs = (await api.tabs.query({ windowType: "normal" })).filter((t) => !t.incognito);
+		const last = tabs.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
+		return last ? api.windows.get(last.windowId).catch(() => null) : null;
 	}
 
 	// Where the window being left is, so the next one can take its place.
@@ -392,8 +401,9 @@ globalThis.TabstackProfiles = (() => {
 
 	let boundsTimer = 0;
 	api.windows.onBoundsChanged?.addListener((win) => {
-		// only the window in front leads; the others moving to match don't
-		if (!win.focused || !connected || !shared.values.stack) return;
+		// only the window in front leads; the others moving to match don't,
+		// nor does an incognito one
+		if (!win.focused || win.incognito || !connected || !shared.values.stack) return;
 		clearTimeout(boundsTimer);
 		boundsTimer = setTimeout(async () => post("*", { kind: "bounds", frame: await currentFrame() }), BOUNDS_DELAY);
 	});
@@ -424,7 +434,7 @@ globalThis.TabstackProfiles = (() => {
 		if (!hooks) return { tabs: [], closed: [] };
 		const [tabs, closed] = await Promise.all([hooks.snapshot(null, { forSearch: true, incognito: false }), hooks.recentlyClosed()]);
 		let answer = { tabs, closed };
-		const size = () => JSON.stringify(answer).length;
+		const size = () => new TextEncoder().encode(JSON.stringify(answer)).length;
 		if (size() > MAX_REPLY) {
 			const bare = (t) => ({ ...t, icon: null });
 			answer = { tabs: tabs.map(bare), closed: closed.map(bare) };
@@ -701,6 +711,7 @@ globalThis.TabstackProfiles = (() => {
 	}
 
 	function onMenu(info, tab) {
+		if (tab?.incognito) return; // nothing incognito goes to another profile
 		const [what, to] = info.menuItemId.split(":");
 		if (what === "link") {
 			openIn(to, info.linkUrl);
