@@ -150,14 +150,19 @@ func buildHelper(t *testing.T) (exe, dir string) {
 	if out, err := exec.Command("go", "build", "-o", exe, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	// unix socket paths are limited to about 100 bytes, which t.TempDir()
-	// can pass on macOS
+	return exe, sockDir(t)
+}
+
+// sockDir is a folder for hubs' sockets. Unix socket paths are limited to
+// about 100 bytes, which t.TempDir() can pass on macOS.
+func sockDir(t *testing.T) string {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "ts")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	return exe, dir
+	return dir
 }
 
 func state(profile string, windows int) map[string]any {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -46,9 +47,10 @@ func TestProfiles(t *testing.T) {
 	writeJSON(t, filepath.Join(data, "Profile 2", "Secure Preferences"), map[string]any{"extensions": map[string]any{"settings": map[string]any{
 		unpackedID: map[string]any{"path": unpacked, "location": locationUnpacked, "disable_reasons": []int{1}},
 	}}})
-	// Profile 10 had the permission once: Chrome keeps it in granted_permissions
-	// after it's removed, but it's not active, so it doesn't count
-	// Profile 10: another extension, and tabstack unpacked, in the older Preferences file
+	// Profile 10: tabstack unpacked beside another extension, in the older
+	// Preferences file. It had the helper's permission once, which Chrome
+	// keeps in granted_permissions after it's removed, but it isn't active,
+	// so tabstack's found there but not granted.
 	other := t.TempDir()
 	writeJSON(t, filepath.Join(other, "manifest.json"), map[string]any{"name": "Some other extension"})
 	writeJSON(t, filepath.Join(data, "Profile 10", "Preferences"), map[string]any{"extensions": map[string]any{"settings": map[string]any{
@@ -206,7 +208,7 @@ func TestWatch(t *testing.T) {
 	b.send(t, map[string]any{"type": "state", "profile": "2", "windows": 1, "info": map[string]any{"name": "Work"}})
 	a.expectPeers(t, "1", "2")
 
-	var got map[string]hubPeer
+	var got map[string]peerInfo
 	for end := time.Now().Add(3 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
 		if got = connectedProfiles(dir); len(got) == 1 {
 			break
@@ -286,5 +288,128 @@ func TestRepair(t *testing.T) {
 	}
 	if m, _ := readHostManifest(other); m == nil || m.Path != elsewhere {
 		t.Errorf("the registration pointing at another copy is %+v, want it left alone", m)
+	}
+}
+
+// Browsers have recorded a turned-off extension as state 0, and as a list of
+// reasons or a bitmask of them.
+func TestDisabled(t *testing.T) {
+	zero, one := 0, 1
+	for _, c := range []struct {
+		name    string
+		state   *int
+		reasons string
+		want    bool
+	}{
+		{"nothing recorded", nil, "", false},
+		{"state 0", &zero, "", true},
+		{"state 1", &one, "", false},
+		{"no reasons", nil, "[]", false},
+		{"a reason", nil, "[1]", true},
+		{"a bitmask of none", nil, "0", false},
+		{"a bitmask", nil, "4", true},
+		{"null", nil, "null", false},
+		{"state 1, with a reason", &one, "[1]", true},
+		{"state 0, with no reasons", &zero, "[]", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := extensionSettings{State: c.state, DisableReason: json.RawMessage(c.reasons)}
+			if got := disabled(s); got != c.want {
+				t.Errorf("disabled = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// register lets in each copy of tabstack it finds, once, then the IDs it was
+// given; and registers with a browser without tabstack only for those.
+func TestRegister(t *testing.T) {
+	const extraID = "ponmlkjihgfedcbaponmlkjihgfedcba"
+	unpacked := t.TempDir()
+	writeJSON(t, filepath.Join(unpacked, "manifest.json"), map[string]any{"name": extensionName})
+	newBrowser := func(name string, ids map[string]string) browser {
+		data := t.TempDir()
+		names := map[string]any{}
+		for dir, id := range ids {
+			names[dir] = map[string]any{"name": dir}
+			settings := map[string]any{}
+			switch id {
+			case storeID:
+				settings[id] = map[string]any{"path": id + "/1.0.0_0", "location": 1}
+			case unpackedID:
+				settings[id] = map[string]any{"path": unpacked, "location": locationUnpacked}
+			}
+			writeJSON(t, filepath.Join(data, dir, "Secure Preferences"), map[string]any{"extensions": map[string]any{"settings": settings}})
+		}
+		writeJSON(t, filepath.Join(data, "Local State"), map[string]any{"profile": map[string]any{"info_cache": names}})
+		return browser{name: name, dataDir: data}
+	}
+
+	for _, c := range []struct {
+		name  string
+		extra []string
+		want  map[string][]string // the IDs let in, by browser; nil for none
+	}{
+		{"found", nil, map[string][]string{"Has": {storeID, unpackedID}}},
+		{"found, and given", []string{extraID}, map[string][]string{"Has": {storeID, unpackedID, extraID}, "Hasn't": {extraID}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			has := newBrowser("Has", map[string]string{"Default": storeID, "Profile 1": storeID, "Profile 2": unpackedID, "Profile 3": ""})
+			hasnt := newBrowser("Hasn't", map[string]string{"Default": ""})
+			gone := browser{name: "Gone", dataDir: filepath.Join(t.TempDir(), "never run")}
+			found, err := register([]browser{has, hasnt, gone}, "/bin/tabstack", c.extra)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(found) != len(c.want) {
+				t.Errorf("register found %d browsers, want %d", len(found), len(c.want))
+			}
+			for _, b := range []browser{has, hasnt, gone} {
+				m, err := readHostManifest(b)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ids []string
+				if m != nil {
+					ids = m.extensionIDs()
+				}
+				if !slices.Equal(ids, c.want[b.name]) {
+					t.Errorf("%s lets in %v, want %v", b.name, ids, c.want[b.name])
+				}
+			}
+			// Profile 3, and with IDs given the other browser's profile
+			targets, missing := printFound(io.Discard, found)
+			if len(targets) != 3 || len(missing) != len(c.want) {
+				t.Errorf("register found tabstack in %d profiles and not in %d, want 3 and %d", len(targets), len(missing), len(c.want))
+			}
+		})
+	}
+}
+
+// Helpers starting together, one per profile, all repair the registration
+// at once; each write is whole, and leaves nothing behind.
+func TestSaveHostManifestConcurrently(t *testing.T) {
+	b := browser{name: "Test", dataDir: t.TempDir()}
+	const n = 20
+	errs := make(chan error, n)
+	for i := range n {
+		go func() { errs <- writeHostManifest(b, fmt.Sprintf("/bin/tabstack-%d", i), []string{storeID}) }()
+	}
+	for range n {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	m, err := readHostManifest(b)
+	if err != nil || m == nil || !strings.HasPrefix(m.Path, "/bin/tabstack-") {
+		t.Errorf("registration = %+v, %v", m, err)
+	}
+	if left := otherFiles(t, b); len(left) > 0 {
+		t.Errorf("left %v beside the registration", left)
+	}
+	if info, err := os.Stat(b.manifest()); err != nil {
+		t.Error(err)
+	} else if info.Mode().Perm() != 0o644 {
+		t.Errorf("registration's mode = %v, want 0644, for the browser to read", info.Mode())
 	}
 }
