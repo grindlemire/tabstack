@@ -81,17 +81,32 @@ func (i profileInfo) MarshalJSON() ([]byte, error) {
 	return i.raw, nil
 }
 
+// UnmarshalJSON reads each field on its own, and leaves out one of the wrong
+// type, rather than failing: info comes from any build of the extension, or
+// anything else that joins the hub, and one profile's odd field would
+// otherwise hide the whole hub from the command line.
 func (i *profileInfo) UnmarshalJSON(b []byte) error {
-	type fields profileInfo // without these methods
-	var f fields
-	if string(b) != "null" {
-		if err := json.Unmarshal(b, &f); err != nil {
-			return err
-		}
-		f.raw = slices.Clone(b) // b is the decoder's, and reused
+	*i = profileInfo{}
+	if string(b) == "null" {
+		return nil
 	}
-	*i = profileInfo(f)
+	var f struct{ Name, Where, Claims, Done json.RawMessage }
+	json.Unmarshal(b, &f) // a value that isn't an object has no fields
+	field(f.Name, &i.Name)
+	field(f.Where, &i.Where)
+	field(f.Claims, &i.Claims)
+	field(f.Done, &i.Done)
+	i.raw = slices.Clone(b) // b is the decoder's, and reused
 	return nil
+}
+
+// field reads raw into to, leaving it as it was when raw is missing or
+// isn't a T.
+func field[T any](raw json.RawMessage, to *T) {
+	var v T
+	if json.Unmarshal(raw, &v) == nil {
+		*to = v
+	}
 }
 
 // newEncoder writes messages as they came. By default an encoder escapes

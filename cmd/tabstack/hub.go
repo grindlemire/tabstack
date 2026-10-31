@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -72,6 +73,13 @@ func (h *hub) handle(conn net.Conn) {
 	for {
 		var m message
 		if err := dec.Decode(&m); err != nil {
+			// A field of the wrong type ("windows":"2") is skipped, message
+			// and all: the decoder has read past it. Dropping the connection
+			// would have the helper rejoin and send it again, for ever.
+			if errors.As(err, new(*json.UnmarshalTypeError)) {
+				log.Printf("hub: skipped a message from %s: %v", cmp.Or(p.profile, p.cli, "a helper"), err)
+				continue
+			}
 			return
 		}
 		h.mu.Lock()

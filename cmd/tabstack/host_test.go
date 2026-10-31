@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -295,5 +298,59 @@ func TestDropsOversize(t *testing.T) {
 	got := b.expect(t, "msg")
 	if body := got["body"].(map[string]any); body["kind"] != "small" {
 		t.Errorf("b got %v first, want the small message", body["kind"])
+	}
+}
+
+// A helper the hub keeps dropping (a hub too old to skip a message it
+// can't read, say) waits longer before each rejoin, rather than spin and
+// fill host.log.
+func TestRejoinBacksOff(t *testing.T) {
+	exe, dir := buildHelper(t)
+	// the hub of the browser that starts the helper, this test
+	ln, err := net.Listen("unix", filepath.Join(dir, fmt.Sprintf("hub-%d.sock", os.Getpid())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	var joins atomic.Int64
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			joins.Add(1)
+			conn.Close()
+		}
+	}()
+	h := startHelper(t, exe, dir)
+	h.send(t, state("1", 1))
+	time.Sleep(1500 * time.Millisecond)
+	// at once, then after 100ms, 200ms, 400ms and 800ms
+	if n := joins.Load(); n > 10 {
+		t.Errorf("the helper joined %d times in 1.5s", n)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "host.log")); err != nil || info.Size() > maxLog {
+		t.Errorf("host.log: %v, %v", info.Size(), err)
+	}
+}
+
+// host.log is cleared once it's grown past maxLog, while the helper runs.
+func TestCappedLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "host.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	l := cappedLog{f}
+	line := []byte(strings.Repeat("x", 99) + "\n")
+	for range 3 * maxLog / len(line) {
+		if _, err := l.Write(line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if info, err := os.Stat(path); err != nil || info.Size() > maxLog+int64(len(line)) {
+		t.Errorf("host.log is %d bytes, over %d", info.Size(), maxLog)
 	}
 }
