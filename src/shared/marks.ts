@@ -18,9 +18,12 @@ export function iconSvg(path: string): SVGSVGElement {
 // a profile with no mark shows its name's.
 export const firstGlyph = (text: string): string => [...new Intl.Segmenter().segment(text)][0]?.segment ?? "";
 
-// How light a #rrggbb color looks, from 0 (black) to 1 (white).
+// How light a #rrggbb color looks, from 0 (black) to 1 (white). Marks come
+// from storage and other profiles, so anything else counts as black, rather
+// than throwing.
 export function lightness(color: string): number {
-	const [r = 0, g = 0, b = 0] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) / 255);
+	const hex = typeof color === "string" ? color : "";
+	const [r = 0, g = 0, b = 0] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255 || 0);
 	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
