@@ -123,8 +123,9 @@ The extension is TypeScript with no runtime dependencies, in `src/`:
 
 | Path | Job |
 | --- | --- |
-| `background/index.ts` | Tab stack, thumbnails and shortcuts |
-| `background/profiles.ts` | Working across profiles (Chrome) |
+| `background/index.ts` | Tab stack, the switch shortcut and messages |
+| `background/thumbnails.ts` | Thumbnails and favicons |
+| `background/profiles.ts`, `background/covers.ts` | Working across profiles, and which profile a link belongs to (Chrome) |
 | `content/index.ts`, `ui/` | The overlay in each page |
 | `content/relay.ts` | Passes keys from iframes to the overlay |
 | `content/media.ts` | Notices a page turning on the microphone or camera, for calls in search (Chrome) |
@@ -161,7 +162,7 @@ To work on the helper, run `go test ./...` and `go build` in `cmd/tabstack/`, th
 
 ### Releasing
 
-- **Extension.** Bump `version` in `src/manifest.json` and run `bun run build`. It writes `tabstack-<version>-chrome.zip` and `tabstack-<version>-firefox.zip` to `dist/`; upload each to its store. The listing text is in `store/listing.md`.
+- **Extension.** Bump `version` in `src/manifest.json` and run `bun run build`. It writes `tabstack-<version>-chrome.zip` and `tabstack-<version>-firefox.zip` to `dist/`; upload each to its store. Firefox also wants the source, since its package is bundled: `git archive --format=zip -o dist/tabstack-<version>-source.zip HEAD`. The listing text is in `store/listing.md`.
 - **Helper.** Run `cmd/tabstack/release.sh <version>`. It builds for macOS and Linux, publishes a release on [grindlemire/homebrew-tap](https://github.com/grindlemire/homebrew-tap), and points the formula at it. `-n` stops after building.
 
 ## License
