@@ -21,8 +21,8 @@ const confirmFor = 5 * time.Second
 type entry struct {
 	n    int
 	b    browser
-	p    profile  // empty for a connected profile install didn't set up
-	peer *hubPeer // set while it's connected
+	p    profile   // empty for a connected profile install didn't set up
+	peer *peerInfo // set while it's connected
 }
 
 func (e entry) name() string {
@@ -59,42 +59,52 @@ func (s *session) Close() {
 	}
 }
 
-// until asks the hubs who's connected until done is satisfied, or the time's
-// up. It asks afresh each time, since the hub can move: a profile told to go
-// may be the one whose helper was the hub.
-func (s *session) until(done func([]hubPeer) bool) bool {
+// until watches the profile id until done is satisfied with what it shows,
+// or the time's up; done gets nil while it isn't connected. It asks the hubs
+// afresh each time, since the hub can move: a profile told to go may be the
+// one whose helper was the hub.
+func (s *session) until(id string, done func(*peerInfo) bool) bool {
 	for end := time.Now().Add(confirmFor); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
-		var all []hubPeer
+		var found *peerInfo
 		for _, c := range liveHubs(s.dir) {
-			all = append(all, c.peers...)
+			if i := slices.IndexFunc(c.peers, func(p peerInfo) bool { return p.Profile == id }); i >= 0 {
+				found = &c.peers[i]
+			}
 			c.Close()
 		}
-		if done(all) {
+		if done(found) {
 			return true
 		}
 	}
 	return false
 }
 
+// errGone is a profile that left before it could be told something.
+var errGone = errors.New("it isn't connected anymore")
+
 // tell sends a profile a command through whichever hub has it now. That can
 // have changed since the session started: the hub moves when the profile
-// whose helper it was leaves.
+// whose helper it was leaves, and for a moment, while the others join the
+// next one, no hub has them.
 func (s *session) tell(id string, body any) error {
-	for _, c := range liveHubs(s.dir) {
-		defer c.Close()
-		if has(id, nil)(c.peers) {
-			return c.send(id, body)
+	for end := time.Now().Add(confirmFor); time.Now().Before(end); time.Sleep(200 * time.Millisecond) {
+		var err error = errGone
+		for _, c := range liveHubs(s.dir) {
+			if err == errGone && has(c.peers, id) {
+				err = c.send(id, body)
+			}
+			c.Close()
+		}
+		if err != errGone {
+			return err
 		}
 	}
-	return errors.New("it isn't connected anymore")
+	return errGone
 }
 
-// has reports whether a profile is connected, and also, unless ok is nil,
-// whether it shows what ok wants to see.
-func has(id string, ok func(hubPeer) bool) func([]hubPeer) bool {
-	return func(peers []hubPeer) bool {
-		return slices.ContainsFunc(peers, func(p hubPeer) bool { return p.Profile == id && (ok == nil || ok(p)) })
-	}
+// has reports whether a profile is among peers.
+func has(peers []peerInfo, id string) bool {
+	return slices.ContainsFunc(peers, func(p peerInfo) bool { return p.Profile == id })
 }
 
 func openSession() (*session, error) {
@@ -109,8 +119,8 @@ func openSession() (*session, error) {
 	s := &session{home: home, dir: dir, hubs: liveHubs(dir)}
 
 	// connected profiles by where they are, as install set them up
-	byWhere := map[string]*hubPeer{}
-	var connected []*hubPeer
+	byWhere := map[string]*peerInfo{}
+	var connected []*peerInfo
 	for _, c := range s.hubs {
 		for i := range c.peers {
 			p := &c.peers[i]
@@ -120,7 +130,7 @@ func openSession() (*session, error) {
 			}
 		}
 	}
-	placed := map[*hubPeer]bool{}
+	placed := map[*peerInfo]bool{}
 
 	for _, b := range knownBrowsers(home) {
 		if !b.installed() {
@@ -150,13 +160,19 @@ func openSession() (*session, error) {
 	return s, nil
 }
 
-// hubVersions is the version of each running browser's hub, by browser.
-func (s *session) hubVersions() map[string]string {
-	out := map[string]string{}
+// hubInfo is what a running browser's hub says about itself.
+type hubInfo struct {
+	version string
+	path    string // its helper, where it watches for a new build
+}
+
+// hubsByBrowser is each running browser's hub, by browser.
+func (s *session) hubsByBrowser() map[string]hubInfo {
+	out := map[string]hubInfo{}
 	for _, c := range s.hubs {
 		for _, p := range c.peers {
 			if b, _, ok := strings.Cut(p.Info.Where, "/"); ok {
-				out[b] = c.version
+				out[b] = hubInfo{c.version, c.path}
 			}
 		}
 	}
@@ -211,7 +227,7 @@ func list(w io.Writer) error {
 		fmt.Fprintln(w, "tabstack isn't installed in any profile here.")
 		return nil
 	}
-	hubs := s.hubVersions()
+	hubs := s.hubsByBrowser()
 	heading := ""
 	for _, e := range s.entries {
 		group := e.b.name
@@ -220,8 +236,8 @@ func list(w io.Writer) error {
 		}
 		if group != heading {
 			heading = group
-			if v, ok := hubs[group]; ok {
-				fmt.Fprintf(w, "%s (helper %s)\n", heading, cmp.Or(v, "older"))
+			if h, ok := hubs[group]; ok {
+				fmt.Fprintf(w, "%s (helper %s)\n", heading, cmp.Or(h.version, "older"))
 			} else {
 				fmt.Fprintln(w, heading)
 			}
@@ -292,11 +308,17 @@ func disconnect(w io.Writer, args []string, all bool) (stillOn int, err error) {
 			continue
 		}
 		id := e.peer.Profile
-		if err := s.tell(id, map[string]any{"kind": "forget"}); err != nil {
+		err := s.tell(id, map[string]any{"kind": "forget"})
+		if errors.Is(err, errGone) {
+			// closed since the session started, still with the permission
+			stillOn++
+			fmt.Fprintf(w, "%s closed before it could be told, so it keeps the permission. Open it, then in tabstack's popup, under Profiles, click Turn off profile features.\n", e.name())
+			continue
+		}
+		if err != nil {
 			return stillOn, err
 		}
-		gone := s.until(func(peers []hubPeer) bool { return !has(id, nil)(peers) })
-		if gone {
+		if s.until(id, func(p *peerInfo) bool { return p == nil }) {
 			fmt.Fprintf(w, "Disconnected %s.\n", e.name())
 		} else {
 			fmt.Fprintf(w, "Asked %s to disconnect, but it hasn't yet.\n", e.name())
@@ -332,7 +354,7 @@ func reset(w io.Writer, args []string) error {
 			return err
 		}
 		// it reconnects, under its new name and with no links
-		back := s.until(has(id, func(p hubPeer) bool { return p.Info.Name == name && len(p.Info.Claims) == 0 }))
+		back := s.until(id, func(p *peerInfo) bool { return p != nil && p.Info.Name == name && len(p.Info.Claims) == 0 })
 		if back {
 			fmt.Fprintf(w, "Reset %s.\n", cmp.Or(name, e.name()))
 		} else {
@@ -362,7 +384,7 @@ func rename(w io.Writer, arg, name string) error {
 	if err := s.tell(id, map[string]any{"kind": "rename", "name": name}); err != nil {
 		return err
 	}
-	if !s.until(has(id, func(p hubPeer) bool { return p.Info.Name == name })) {
+	if !s.until(id, func(p *peerInfo) bool { return p != nil && p.Info.Name == name }) {
 		return fmt.Errorf("%s didn't take the name", e.name())
 	}
 	fmt.Fprintf(w, "Renamed %s to %s.\n", e.name(), name)
@@ -416,7 +438,7 @@ func links(w io.Writer, args []string) error {
 	if err := s.tell(id, map[string]any{"kind": "links", "links": next}); err != nil {
 		return err
 	}
-	if !s.until(has(id, func(p hubPeer) bool { return slices.Equal(p.Info.Claims, next) })) {
+	if !s.until(id, func(p *peerInfo) bool { return p != nil && slices.Equal(p.Info.Claims, next) }) {
 		return fmt.Errorf("%s didn't take the change", e.name())
 	}
 	fmt.Fprintf(w, "Links that open in %s: %s\n", e.name(), cmp.Or(strings.Join(next, ", "), "none"))

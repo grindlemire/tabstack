@@ -47,7 +47,60 @@ func TestDoctor(t *testing.T) {
 	if m == nil || m.Path != self || !slices.Equal(m.extensionIDs(), []string{storeID, unpackedID}) {
 		t.Errorf("registration = %+v, want it at %s letting in both", m, self)
 	}
-	if _, err := os.Stat(b.manifest() + ".new"); err == nil {
-		t.Error("left the new registration's temporary file")
+	if left := otherFiles(t, b); len(left) > 0 {
+		t.Errorf("left %v beside the registration", left)
+	}
+}
+
+// otherFiles lists what's beside a browser's registration of the helper,
+// like a temporary file a write left behind.
+func otherFiles(t *testing.T, b browser) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(b.manifest()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.Name() != filepath.Base(b.manifest()) {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
+// doctor says profiles move to the registered helper on their own only when
+// the hub watches where it's registered (watchExe).
+func TestHubNote(t *testing.T) {
+	dir := t.TempDir()
+	registered, other := filepath.Join(dir, "tabstack"), filepath.Join(dir, "other")
+	for _, f := range []string{registered, other} {
+		if err := os.WriteFile(f, []byte(f), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(registered, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		hub  hubInfo
+		want string
+	}{
+		{"the same version", hubInfo{"1.2.0", other}, ""},
+		{"too old to say", hubInfo{"", ""}, "older than this one. Quit and reopen Chrome to move to 1.2.0."},
+		{"watching where it's registered", hubInfo{"1.1.0", registered}, "is 1.1.0; profiles move to 1.2.0 within a minute."},
+		{"watching it by a link", hubInfo{"1.1.0", link}, "within a minute"},
+		{"watching another copy", hubInfo{"1.1.0", other}, "is 1.1.0. Quit and reopen Chrome to move to 1.2.0."},
+		{"watching a copy that's gone", hubInfo{"1.1.0", filepath.Join(dir, "gone")}, "Quit and reopen"},
+		{"too old to say where", hubInfo{"1.1.0", ""}, "Quit and reopen"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := hubNote("Chrome", c.hub, registered, "1.2.0")
+			if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+				t.Errorf("hubNote = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

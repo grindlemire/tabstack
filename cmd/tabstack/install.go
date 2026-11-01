@@ -288,11 +288,24 @@ func saveHostManifest(b browser, m hostManifest) error {
 	if err := os.MkdirAll(filepath.Dir(b.manifest()), 0o755); err != nil {
 		return err
 	}
-	tmp := b.manifest() + ".new"
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+	// a file of its own: every helper repairs registrations as it starts,
+	// and a browser starts one per profile at once
+	tmp, err := os.CreateTemp(filepath.Dir(b.manifest()), "."+hostName+".*.json")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, b.manifest())
+	defer os.Remove(tmp.Name()) // once renamed, there's nothing there
+	_, err = tmp.Write(append(raw, '\n'))
+	if err == nil {
+		err = tmp.Chmod(0o644)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), b.manifest())
 }
 
 // readHostManifest reads the helper's registration with a browser; nil when
@@ -321,18 +334,24 @@ func (m hostManifest) extensionIDs() []string {
 	return ids
 }
 
+// repaired is a registration repair changed.
+type repaired struct {
+	browser  string
+	was, now string // the binary it pointed at
+}
+
 // repair points the helper's registration with each browser at this binary,
 // by a path that lasts, where it points at one that's gone or at this one by
 // a path that won't last (an older install from Homebrew's versioned
 // folder). One pointing at another copy that's still there is left alone. It
 // returns what it changed.
-func repair(home string) ([]string, error) {
+func repair(home string) ([]repaired, error) {
 	self, err := selfPath()
 	if err != nil {
 		return nil, err
 	}
 	want := lastingPath(self)
-	var fixed []string
+	var fixed []repaired
 	for _, b := range knownBrowsers(home) {
 		m, err := readHostManifest(b)
 		if err != nil || m == nil || m.Path == want {
@@ -346,7 +365,7 @@ func repair(home string) ([]string, error) {
 		if err := saveHostManifest(b, *m); err != nil {
 			return fixed, fmt.Errorf("registering with %s: %w", b.name, err)
 		}
-		fixed = append(fixed, fmt.Sprintf("%s: pointed at %s, now %s", b.name, was, want))
+		fixed = append(fixed, repaired{b.name, was, want})
 	}
 	return fixed, nil
 }
@@ -375,24 +394,22 @@ func install(w io.Writer, extraIDs []string) error {
 		return fmt.Errorf("the helper doesn't run on %s yet", runtime.GOOS)
 	}
 
-	targets, missing, err := register(w, browsers, exe, extraIDs)
+	found, err := register(browsers, exe, extraIDs)
 	if err != nil {
 		return err
 	}
-	if len(targets) == 0 {
+	if !anyTabstack(found) {
 		// tabstack installed a moment ago isn't in the browser's preferences
 		// until it saves them, some seconds later
 		fmt.Fprintln(w, "Looking for tabstack…")
-		for end := time.Now().Add(prefsDelay); len(targets) == 0 && time.Now().Before(end); {
+		for end := time.Now().Add(prefsDelay); !anyTabstack(found) && time.Now().Before(end); {
 			time.Sleep(time.Second)
-			if targets, missing, err = register(io.Discard, browsers, exe, extraIDs); err != nil {
+			if found, err = register(browsers, exe, extraIDs); err != nil {
 				return err
 			}
 		}
-		if len(targets) > 0 {
-			register(w, browsers, exe, extraIDs)
-		}
 	}
+	targets, missing := printFound(w, found)
 	if len(targets) == 0 {
 		return errors.New("tabstack isn't installed in any profile. Install it in each profile you use, then run this again")
 	}
@@ -403,17 +420,27 @@ func install(w io.Writer, extraIDs []string) error {
 	return err
 }
 
+// registered is a browser register looked in: its profiles, and the helper
+// registered with it, or why they couldn't be read.
+type registered struct {
+	b    browser
+	list []profile
+	err  error
+}
+
 // register finds tabstack in each browser's profiles, registers the helper
-// with every browser that has it, and lists what it found: the profiles with
-// tabstack, and those without it in a browser that has it somewhere.
-func register(w io.Writer, browsers []browser, exe string, extraIDs []string) (targets, missing []target, err error) {
+// with every browser that has it, letting in each copy it found and
+// extraIDs, and returns those browsers. Any other copy the registration let
+// in before is left out.
+func register(browsers []browser, exe string, extraIDs []string) ([]registered, error) {
+	var found []registered
 	for _, b := range browsers {
 		if !b.installed() {
 			continue
 		}
 		list, err := profiles(b)
 		if err != nil {
-			fmt.Fprintf(w, "%s: %v\n", b.name, err)
+			found = append(found, registered{b: b, err: err})
 			continue
 		}
 		var ids []string
@@ -426,21 +453,40 @@ func register(w io.Writer, browsers []browser, exe string, extraIDs []string) (t
 			continue
 		}
 		if err := writeHostManifest(b, exe, append(ids, extraIDs...)); err != nil {
-			return nil, nil, fmt.Errorf("registering with %s: %w", b.name, err)
+			return nil, fmt.Errorf("registering with %s: %w", b.name, err)
 		}
-		fmt.Fprintf(w, "%s\n", b.name)
-		for _, p := range list {
+		found = append(found, registered{b: b, list: list})
+	}
+	return found, nil
+}
+
+func anyTabstack(found []registered) bool {
+	return slices.ContainsFunc(found, func(r registered) bool {
+		return slices.ContainsFunc(r.list, func(p profile) bool { return p.id != "" })
+	})
+}
+
+// printFound shows what register found, and lists the profiles with
+// tabstack, and those without it in a browser that has it somewhere.
+func printFound(w io.Writer, found []registered) (targets, missing []target) {
+	for _, r := range found {
+		if r.err != nil {
+			fmt.Fprintf(w, "%s: %v\n", r.b.name, r.err)
+			continue
+		}
+		fmt.Fprintf(w, "%s\n", r.b.name)
+		for _, p := range r.list {
 			note := "tabstack isn't installed here"
 			if p.id != "" {
 				note = "found tabstack"
-				targets = append(targets, target{b, p})
+				targets = append(targets, target{r.b, p})
 			} else {
-				missing = append(missing, target{b, p})
+				missing = append(missing, target{r.b, p})
 			}
 			fmt.Fprintf(w, "  %-28s %s\n", p.name, note)
 		}
 	}
-	return targets, missing, nil
+	return targets, missing
 }
 
 // connectAll sets up each profile that isn't connected yet, one at a time:
@@ -476,7 +522,7 @@ func connectAll(w io.Writer, home string, targets []target) error {
 			continue
 		}
 		fmt.Fprintf(w, "  %s: waiting for Allow…\n", t.p.name)
-		peer, ok := waitForPeer(dir, key, func(hubPeer) bool { return true })
+		peer, ok := waitForPeer(dir, key, func(peerInfo) bool { return true })
 		if !ok {
 			fmt.Fprintf(w, "  %s didn't connect; moving on.\n", t.p.name)
 			missed = append(missed, t)
@@ -488,7 +534,7 @@ func connectAll(w io.Writer, home string, targets []target) error {
 			// until it's reloaded, and that code predates Done
 			fmt.Fprintf(w, "  %s is running an older tabstack that can't report Done. Reload it on chrome://extensions in that profile.\n", t.p.name)
 		}
-		peer, ok = waitForPeer(dir, key, func(p hubPeer) bool { return p.Info.Done != nil && *p.Info.Done == run })
+		peer, ok = waitForPeer(dir, key, func(p peerInfo) bool { return p.Info.Done != nil && *p.Info.Done == run })
 		if !ok {
 			fmt.Fprintf(w, "  %s is connected, but Done wasn't clicked; moving on.\n", t.p.name)
 			continue
@@ -511,13 +557,13 @@ func connectAll(w io.Writer, home string, targets []target) error {
 
 // waitForPeer waits until the profile at key is connected and ready says
 // it's what install is waiting for, or the time's up.
-func waitForPeer(dir, key string, ready func(hubPeer) bool) (hubPeer, bool) {
+func waitForPeer(dir, key string, ready func(peerInfo) bool) (peerInfo, bool) {
 	for end := time.Now().Add(waitFor); time.Now().Before(end); time.Sleep(300 * time.Millisecond) {
 		if p, ok := connectedProfiles(dir)[key]; ok && ready(p) {
 			return p, true
 		}
 	}
-	return hubPeer{}, false
+	return peerInfo{}, false
 }
 
 // openSetup opens tabstack's setup page in one profile, telling it which

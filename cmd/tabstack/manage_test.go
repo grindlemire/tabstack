@@ -8,7 +8,7 @@ import (
 )
 
 func TestFind(t *testing.T) {
-	work := hubPeer{Profile: "p2"}
+	work := peerInfo{Profile: "p2"}
 	work.Info.Name = "Work"
 	s := &session{}
 	s.entries = []entry{

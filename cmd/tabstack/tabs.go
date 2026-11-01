@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"os/exec"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // askFor bounds how long the command line waits for profiles to answer.
@@ -157,7 +159,7 @@ func (s *session) activate(e entry) {
 // request asks a profile to do something and waits for it to say it has.
 func (s *session) request(e entry, body map[string]any) error {
 	for _, c := range s.hubs {
-		if !has(e.peer.Profile, nil)(c.peers) {
+		if !has(c.peers, e.peer.Profile) {
 			continue
 		}
 		answers, err := c.ask(e.peer.Profile, body, askFor)
@@ -274,14 +276,21 @@ func start(name string, args ...string) error {
 }
 
 // covers reports whether a pattern from "Links that open in this profile"
-// covers a link, the same way tabstack does (covers in src/profiles.js).
-// "corp.com" is that site (and www.corp.com), "*.corp.com" adds its
+// covers a link, the same way tabstack does (covers in
+// src/background/covers.ts; testdata/covers.json holds both to the same
+// cases). "corp.com" is that site (and www.corp.com), "*.corp.com" adds its
 // subdomains, and a path covers everything under it. A * matches anything.
+// A port ("localhost:3000") has to match too; without one, any port does.
 func covers(pattern string, u *url.URL) bool {
 	p := strings.ToLower(strings.TrimSpace(pattern))
 	p = strings.TrimPrefix(strings.TrimPrefix(p, "http://"), "https://")
 	site, path, _ := strings.Cut(p, "/")
-	if site == "" {
+	// an IPv6 address is bracketed when it has a port, and may be bare when it hasn't
+	host, port := "["+site+"]", ""
+	if m := siteParts.FindStringSubmatch(site); m != nil {
+		host, port = m[1], m[2]
+	}
+	if host == "" {
 		return false
 	}
 	glob := func(text, star string) string {
@@ -291,26 +300,88 @@ func covers(pattern string, u *url.URL) bool {
 		}
 		return strings.Join(parts, star)
 	}
-	var sitePattern string
-	if rest, ok := strings.CutPrefix(site, "*."); ok {
-		sitePattern = `(?:[^/]*\.)?` + glob(rest, "[^/]*")
+	var hostPattern string
+	if rest, ok := strings.CutPrefix(host, "*."); ok {
+		hostPattern = `(?:[^/]*\.)?` + glob(rest, "[^/]*")
 	} else {
-		sitePattern = `(?:www\.)?` + glob(site, "[^/]*")
+		hostPattern = `(?:www\.)?` + glob(host, "[^/]*")
 	}
-	// a port in the pattern ("localhost:3000") has to match too
-	host := u.Hostname()
-	if strings.Contains(site, ":") {
-		host = u.Host
-	}
-	if !regexp.MustCompile(`^` + sitePattern + `$`).MatchString(strings.ToLower(host)) {
+	if !regexp.MustCompile(`^` + hostPattern + `$`).MatchString(browserHost(u)) {
 		return false
 	}
+	// "localhost:80" is http://localhost/ too, which a browser writes without the port
+	linkPort := u.Port()
+	if linkPort == "" && u.Scheme == "https" {
+		linkPort = "443"
+	} else if linkPort == "" {
+		linkPort = "80"
+	}
+	if port != "" && !regexp.MustCompile(`^`+glob(port, ".*")+`$`).MatchString(linkPort) {
+		return false
+	}
+	path = unescape(path)
 	if trimmed, ok := strings.CutSuffix(path, "/*"); ok {
 		path = trimmed
 	}
-	path = strings.TrimRight(path, "/")
+	path = strings.TrimRight(strings.ToLower(path), "/")
 	if path == "" {
 		return true
 	}
-	return regexp.MustCompile(`^/` + glob(path, ".*") + `(?:/.*)?$`).MatchString(strings.ToLower(u.EscapedPath()))
+	linkPath := strings.ToLower(unescape(dotless(u.EscapedPath())))
+	return regexp.MustCompile(`^/` + glob(path, ".*") + `(?:/.*)?$`).MatchString(linkPath)
+}
+
+// siteParts splits a pattern's site into its host and port.
+var siteParts = regexp.MustCompile(`^(\[[^\]]*\]|[^:]*)(?::([^:]*))?$`)
+
+// browserHost is u's host as a browser has it, for covers: lowercase, and an
+// IPv6 address bracketed and shortened, with no dotted IPv4 in it.
+func browserHost(u *url.URL) string {
+	h := strings.ToLower(u.Hostname())
+	a, err := netip.ParseAddr(h)
+	if err != nil || !a.Is6() {
+		return h
+	}
+	if a.Is4In6() {
+		b := a.As16()
+		return fmt.Sprintf("[::ffff:%x:%x]", uint16(b[12])<<8|uint16(b[13]), uint16(b[14])<<8|uint16(b[15]))
+	}
+	return "[" + a.String() + "]"
+}
+
+// dotless resolves a path's . and .. segments, escaped or not, as a browser
+// does before it loads the page.
+func dotless(path string) string {
+	segs := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	out := make([]string, 0, len(segs))
+	for i, s := range segs {
+		last := i == len(segs)-1
+		switch strings.ToLower(s) {
+		case "..", ".%2e", "%2e.", "%2e%2e":
+			if len(out) > 0 {
+				out = out[:len(out)-1]
+			}
+			if last {
+				out = append(out, "")
+			}
+		case ".", "%2e":
+			if last {
+				out = append(out, "")
+			}
+		default:
+			out = append(out, s)
+		}
+	}
+	return "/" + strings.Join(out, "/")
+}
+
+// unescape decodes a path's escapes, so "/caf%C3%A9" is "/café" however
+// either was written. It's left as is when they aren't UTF-8, as
+// decodeURIComponent leaves it in tabstack.
+func unescape(path string) string {
+	d, err := url.PathUnescape(path)
+	if err != nil || !utf8.ValidString(d) {
+		return path
+	}
+	return d
 }

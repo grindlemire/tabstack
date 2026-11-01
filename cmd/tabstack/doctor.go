@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -49,7 +50,7 @@ func doctor(w io.Writer) error {
 		fmt.Fprintln(w, "\ntabstack isn't installed in any profile here.")
 	}
 
-	hubs := s.hubVersions()
+	hubs := s.hubsByBrowser()
 
 	for _, b := range knownBrowsers(home) {
 		var here []entry
@@ -64,23 +65,26 @@ func doctor(w io.Writer) error {
 		fmt.Fprintf(w, "\n%s\n", b.name)
 
 		m, err := readHostManifest(b)
+		want := "" // the version of the helper it's registered at
 		switch {
 		case err != nil:
 			bad("can't read the helper's registration: %v", err)
 		case m == nil:
 			bad("the helper isn't registered. Run tabstack install.")
 		default:
-			for _, f := range fixed {
-				if strings.HasPrefix(f, b.name+":") {
-					good("fixed the registration, which %s", strings.TrimPrefix(f, b.name+": "))
+			for _, r := range fixed {
+				if r.browser == b.name {
+					good("fixed the registration, which pointed at %s, now %s", r.was, r.now)
 				}
 			}
 			switch {
 			case !fileExists(m.Path):
 				bad("registered at %s, which is gone. Run tabstack install.", m.Path)
 			case !sameFile(m.Path, self):
-				note("registered at %s (%s), not this copy, so profiles use that one. Run this copy's install to switch.", m.Path, versionOf(m.Path))
+				want = versionOf(m.Path)
+				note("registered at %s (%s), not this copy, so profiles use that one. Run this copy's install to switch.", m.Path, cmp.Or(want, "an older version"))
 			default:
+				want = version
 				good("registered at %s", m.Path)
 			}
 			// a copy of tabstack the registration doesn't let in can't reach the helper
@@ -100,11 +104,9 @@ func doctor(w io.Writer) error {
 			}
 		}
 
-		if v, ok := hubs[b.name]; ok && v != version {
-			if v == "" {
-				note("the helper running for it is older than this one. Quit and reopen %s to move to %s.", b.name, version)
-			} else {
-				note("the helper running for it is %s; profiles move to %s within a minute.", v, version)
+		if h, ok := hubs[b.name]; ok && want != "" {
+			if n := hubNote(b.name, h, m.Path, want); n != "" {
+				note("%s", n)
 			}
 		}
 		for _, e := range here {
@@ -151,18 +153,35 @@ func doctor(w io.Writer) error {
 	return nil
 }
 
-// versionOf asks another copy of the helper which version it is.
+// hubNote says how a browser's profiles get from the hub running for it to
+// the helper registered at path, of version want: on their own when a new
+// build turned up where the hub watches for one (watchExe), which is where
+// it started from, or else once the browser's reopened.
+func hubNote(browser string, h hubInfo, path, want string) string {
+	switch {
+	case h.version == want:
+		return ""
+	case h.version == "":
+		return fmt.Sprintf("the helper running for it is older than this one. Quit and reopen %s to move to %s.", browser, want)
+	case h.path != "" && sameFile(h.path, path):
+		return fmt.Sprintf("the helper running for it is %s; profiles move to %s within a minute.", h.version, want)
+	}
+	return fmt.Sprintf("the helper running for it is %s. Quit and reopen %s to move to %s.", h.version, browser, want)
+}
+
+// versionOf asks another copy of the helper which version it is; "" when
+// it can't say.
 func versionOf(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "version").Output()
 	if err != nil {
-		return "an older version"
+		return ""
 	}
 	// "tabstack 1.2.0", or "tabstack-host 1.1.0" from before the rename
 	f := strings.Fields(string(out))
 	if len(f) == 0 {
-		return "an older version"
+		return ""
 	}
 	return f[len(f)-1]
 }

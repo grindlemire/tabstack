@@ -1,43 +1,26 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
 )
 
-// commands, for completion: each with what it does, and whether its
-// arguments are profiles (all of them, or just the first).
-var commands = []struct {
-	name, about string
-	profiles    string // "all", "first" or ""
-}{
-	{"install", "find tabstack in every profile and connect each", ""},
-	{"list", "every profile, and how it's connected", ""},
-	{"connect", "connect profiles", "all"},
-	{"disconnect", "stop profiles connecting", "all"},
-	{"reset", "clear a profile's name and links", "all"},
-	{"rename", "change the name other profiles show", "first"},
-	{"links", "the links that open in a profile", "first"},
-	{"uninstall", "disconnect every profile and unregister the helper", ""},
-	{"open", "open links in the profile they belong to", ""},
-	{"tabs", "every profile's tabs, most recent first", ""},
-	{"focus", "bring a profile forward, or one of its tabs", "first"},
-	{"doctor", "check the setup, and fix what it can", ""},
-	{"version", "which version this is", ""},
-	{"completion", "shell completion for bash, zsh or fish", ""},
-}
-
 // completion prints the script that completes these commands in a shell,
 // for Homebrew to install or to source from a shell's startup file.
 func completion(w io.Writer, shell string) error {
 	var names, all, first, described, fish string
 	for _, c := range commands {
+		if c.hidden {
+			continue
+		}
+		about := cmp.Or(c.about, c.help)
 		names += " " + c.name
 		// a ' ends a single-quoted string, in zsh by '\'' and in fish by \'
-		described += fmt.Sprintf("\n    '%s:%s'", c.name, strings.ReplaceAll(c.about, "'", `'\''`))
-		fish += fmt.Sprintf("complete -c tabstack -n __fish_use_subcommand -a %s -d '%s'\n", c.name, strings.ReplaceAll(c.about, "'", `\'`))
+		described += fmt.Sprintf("\n    '%s:%s'", c.name, strings.ReplaceAll(about, "'", `'\''`))
+		fish += fmt.Sprintf("complete -c tabstack -n __fish_use_subcommand -a %s -d '%s'\n", c.name, strings.ReplaceAll(about, "'", `\'`))
 		switch c.profiles {
 		case "all":
 			all += "|" + c.name

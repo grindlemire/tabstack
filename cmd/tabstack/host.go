@@ -54,8 +54,8 @@ func runHost() error {
 	log.Printf("started by %d (version %s)", os.Getppid(), version)
 	if home, err := os.UserHomeDir(); err == nil {
 		fixed, err := repair(home)
-		for _, f := range fixed {
-			log.Printf("repaired the registration with %s", f)
+		for _, r := range fixed {
+			log.Printf("repaired the registration with %s: pointed at %s, now %s", r.browser, r.was, r.now)
 		}
 		if err != nil {
 			log.Printf("repairing registrations: %v", err)
@@ -203,7 +203,31 @@ func joinHub(base string) (net.Conn, error) {
 // as it runs, so only one helper can win, and the lock goes when that helper
 // exits, however it exits.
 func becomeHub(base string) (*hub, error) {
-	f, err := os.OpenFile(base+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := tryLock(base+".lock", os.O_CREATE)
+	if err != nil || f == nil {
+		return nil, err
+	}
+	sock := base + ".sock"
+	os.Remove(sock) // left by a hub that exited
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	exe, _ := helperPath()
+	h := &hub{lock: f, exe: exe, peers: map[*peer]bool{}}
+	log.Printf("hub: listening on %s", sock)
+	go h.serve(ln)
+	go h.watchExe()
+	return h, nil
+}
+
+// tryLock takes an exclusive lock on the file at path without waiting. It
+// returns nil when another process holds it, or when the file was removed or
+// replaced between opening and locking it (by removeStale, say), since a lock
+// on a file that's no longer at path keeps no one else out.
+func tryLock(path string, flag int) (*os.File, error) {
+	f, err := os.OpenFile(path, flag|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -214,16 +238,11 @@ func becomeHub(base string) (*hub, error) {
 		}
 		return nil, err
 	}
-	sock := base + ".sock"
-	os.Remove(sock) // left by a hub that exited
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
+	locked, err := f.Stat()
+	there, err2 := os.Stat(path)
+	if err != nil || err2 != nil || !os.SameFile(locked, there) {
 		f.Close()
-		return nil, err
+		return nil, nil
 	}
-	h := &hub{lock: f, peers: map[*peer]bool{}}
-	log.Printf("hub: listening on %s", sock)
-	go h.serve(ln)
-	go h.watchExe()
-	return h, nil
+	return f, nil
 }
