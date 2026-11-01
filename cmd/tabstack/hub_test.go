@@ -160,3 +160,37 @@ func TestInfoPassesThrough(t *testing.T) {
 		t.Errorf("a profile with no info = %s", raw)
 	}
 }
+
+// A message with a field of the wrong type is skipped, and the connection
+// kept: dropping it would have the helper rejoin and send it again, over
+// and over.
+func TestHubSkipsBadlyTyped(t *testing.T) {
+	h := &hub{peers: map[*peer]bool{}}
+	conn, lines := pipePeer(t, h, "1", false)
+	for _, m := range []string{
+		`{"type":"state","profile":"1","windows":"2"}`,
+		`{"type":"state","profile":"1","windows":1.5}`,
+		`"state"`,
+		`{"type":"state","profile":"1","windows":3}`,
+	} {
+		if _, err := conn.Write([]byte(m + "\n")); err != nil {
+			t.Fatalf("writing %s: %v", m, err)
+		}
+	}
+	for deadline := time.After(3 * time.Second); ; {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatal("the hub dropped the connection")
+			}
+			if bytes.Contains(line, []byte(`"windows":3`)) {
+				return
+			}
+			if bytes.Contains(line, []byte(`"windows":2`)) {
+				t.Errorf("the hub took part of a bad message: %s", line)
+			}
+		case <-deadline:
+			t.Fatal("the message after the bad ones was never announced")
+		}
+	}
+}

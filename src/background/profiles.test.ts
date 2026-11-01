@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanInfo, strings } from "./profiles";
+import { cleanClosed, cleanInfo, cleanTab, strings } from "./profiles";
 
 describe("cleanInfo", () => {
 	test("keeps what a profile says of itself when it's the right type", () => {
@@ -48,5 +48,47 @@ describe("strings", () => {
 		expect(strings(["a", 1, "b"])).toEqual(["a", "b"]);
 		expect(strings(null)).toEqual([]);
 		expect(strings("a")).toEqual([]);
+	});
+});
+
+describe("cleanTab", () => {
+	test("keeps a well-formed row from another profile, without a thumbnail", () => {
+		const tab = {
+			id: 4,
+			windowId: 2,
+			title: "Inbox",
+			url: "https://mail.example.com/",
+			icon: "data:image/png;base64,AA",
+			audible: true,
+			call: false,
+			thumb: "data:image/jpeg;base64,BB",
+		};
+		expect(cleanTab(tab)).toEqual({ ...tab, thumb: null });
+	});
+
+	test("drops fields of the wrong type, and rows without ids", () => {
+		expect(cleanTab({ id: 1, windowId: 1, title: 5, url: {}, icon: "javascript:x", audible: "yes" })).toEqual({
+			id: 1,
+			windowId: 1,
+			icon: null,
+			audible: false,
+			call: false,
+			thumb: null,
+		});
+		for (const bad of [null, "tab", [], { id: "1", windowId: 1 }, { id: 1 }]) expect(cleanTab(bad)).toBeNull();
+	});
+});
+
+describe("cleanClosed", () => {
+	test("keeps the session id, title and address when they're strings", () => {
+		expect(cleanClosed({ sessionId: "s1", title: "Docs", url: "https://docs.example.com/", icon: null })).toEqual({
+			closed: true,
+			sessionId: "s1",
+			title: "Docs",
+			url: "https://docs.example.com/",
+			icon: null,
+		});
+		expect(cleanClosed({ sessionId: 3, title: ["x"] })).toEqual({ closed: true, icon: null });
+		expect(cleanClosed(7)).toBeNull();
 	});
 });

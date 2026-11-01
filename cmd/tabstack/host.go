@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// maxLog caps host.log; a bigger log is cleared when the helper starts.
+// maxLog caps host.log; a bigger log is cleared before the next line.
 const maxLog = 1 << 20
 
 // maxWrite is Chrome's limit on a message from the host to the extension. A
@@ -23,6 +23,14 @@ const maxWrite = 1 << 20
 // joinTimeout bounds how long a helper waits for another to finish becoming
 // the hub.
 const joinTimeout = 5 * time.Second
+
+// A helper the hub keeps dropping waits before each rejoin, from
+// minRejoinDelay doubling to maxRejoinDelay, so it doesn't spin; one that
+// stayed joined longer than that rejoins at once, as when the hub moves.
+const (
+	minRejoinDelay = 100 * time.Millisecond
+	maxRejoinDelay = 5 * time.Second
+)
 
 // runHost is the entry point when a browser starts the helper. It returns when
 // the browser closes the connection.
@@ -35,16 +43,12 @@ func runHost() error {
 		return err
 	}
 	// stdout belongs to the browser, so logs go to a file.
-	logPath := filepath.Join(dir, "host.log")
-	if info, err := os.Stat(logPath); err == nil && info.Size() > maxLog {
-		os.Truncate(logPath, 0)
-	}
-	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logf, err := os.OpenFile(filepath.Join(dir, "host.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
 	defer logf.Close()
-	log.SetOutput(logf)
+	log.SetOutput(cappedLog{logf})
 	log.SetPrefix(fmt.Sprintf("[%d] ", os.Getpid()))
 
 	// The browser starts every profile's helper itself, so its process ID
@@ -64,6 +68,18 @@ func runHost() error {
 	err = relay(base, os.Stdin, os.Stdout)
 	log.Printf("done: %v", err)
 	return err
+}
+
+// cappedLog is host.log, cleared once it's grown past maxLog. A helper runs
+// as long as its browser, for weeks, and every helper of every browser
+// writes to it.
+type cappedLog struct{ f *os.File }
+
+func (l cappedLog) Write(b []byte) (int, error) {
+	if info, err := l.f.Stat(); err == nil && info.Size() > maxLog {
+		l.f.Truncate(0) // opened to append, so the next line goes at the start
+	}
+	return l.f.Write(b)
 }
 
 // hubDir holds the hub's socket and lock, and the log.
@@ -101,11 +117,13 @@ func relay(base string, in io.Reader, out io.Writer) error {
 	self, _ := selfPath()
 	hello, _ := json.Marshal(message{Type: "hello", Version: version, Binary: fileID(self)})
 	var state []byte // the profile's last state message
+	var delay time.Duration
 	for {
 		conn, err := joinHub(base)
 		if err != nil {
 			return err
 		}
+		joined := time.Now()
 		// The hub's messages go to the browser from their own goroutine, so
 		// this one blocking on a write to the hub never stops them being read:
 		// the hub, writing to us at the same time, would give up on us.
@@ -138,7 +156,12 @@ func relay(base string, in io.Reader, out io.Writer) error {
 		if werr := <-lost; werr != nil {
 			return werr
 		}
-		log.Printf("lost the hub (%v); rejoining", err)
+		if time.Since(joined) > maxRejoinDelay {
+			delay = 0
+		}
+		log.Printf("lost the hub (%v); rejoining in %v", err, delay)
+		time.Sleep(delay)
+		delay = min(max(2*delay, minRejoinDelay), maxRejoinDelay)
 	}
 }
 

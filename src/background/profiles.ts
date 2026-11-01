@@ -651,8 +651,14 @@ export function createProfiles() {
 		if (!shared.values.searchAll) return { tabs, closed, profiles, marks };
 		for (const answer of await ask({ kind: "tabs" })) {
 			const origin = { profile: answer.from, profileName: nameOf(answer.from) };
-			if (Array.isArray(answer.tabs)) tabs.push(...answer.tabs.map((t) => ({ ...t, ...origin })));
-			if (Array.isArray(answer.closed)) closed.push(...answer.closed.map((t) => ({ ...t, ...origin })));
+			for (const t of Array.isArray(answer.tabs) ? answer.tabs : []) {
+				const tab = cleanTab(t);
+				if (tab) tabs.push({ ...tab, ...origin });
+			}
+			for (const t of Array.isArray(answer.closed) ? answer.closed : []) {
+				const tab = cleanClosed(t);
+				if (tab) closed.push({ ...tab, ...origin });
+			}
 		}
 		return { tabs, closed, profiles, marks };
 	}
@@ -1048,3 +1054,38 @@ export const strings = (list: unknown): string[] =>
 	Array.isArray(list) ? list.filter((s): s is string => typeof s === "string") : [];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+// Another profile's tabs, for search here: its rows are drawn and ranked by
+// their title and address, which throw on anything but a string, so a row
+// keeps only fields of the right type, and one without an id is dropped.
+export function cleanTab(tab: unknown): TabItem | null {
+	if (!isRecord(tab) || typeof tab.id !== "number" || typeof tab.windowId !== "number") return null;
+	return {
+		id: tab.id,
+		windowId: tab.windowId,
+		...text(tab),
+		icon: imageOf(tab.icon),
+		audible: tab.audible === true,
+		call: tab.call === true,
+		thumb: null,
+	};
+}
+
+export function cleanClosed(tab: unknown): ClosedItem | null {
+	if (!isRecord(tab)) return null;
+	return {
+		closed: true,
+		...(typeof tab.sessionId === "string" && { sessionId: tab.sessionId }),
+		...text(tab),
+		icon: imageOf(tab.icon),
+	};
+}
+
+const text = (tab: Record<string, unknown>) => ({
+	...(typeof tab.title === "string" && { title: tab.title }),
+	...(typeof tab.url === "string" && { url: tab.url }),
+});
+
+// Icons arrive as data URLs; anything else isn't one.
+const imageOf = (icon: unknown): string | null =>
+	typeof icon === "string" && icon.startsWith("data:image/") ? icon : null;

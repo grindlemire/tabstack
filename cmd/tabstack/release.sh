@@ -8,8 +8,8 @@
 #
 # -n runs the tests, builds the archives and the formula into a temporary
 # folder, and stops there. Without it, everything's checked before anything's
-# published: this repo is committed, the tap clone is clean and up to date,
-# and the release doesn't exist yet. The tap clone defaults to
+# published: this repo is committed and pushed, the tap clone is clean and up
+# to date, and the release doesn't exist yet. The tap clone defaults to
 # ~/code/personal/homebrew-tap.
 set -euo pipefail
 
@@ -28,8 +28,12 @@ die() {
 	exit 1
 }
 
+# 1.2.0, not v1.2.0: the tag adds the v
+[[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the version is like 1.2.0, not $v"
 if [ -z "$dry" ]; then
 	[ -z "$(git -C "$here" status --porcelain)" ] || die "commit your changes first"
+	# the release notes link the commit on GitHub
+	[ -n "$(git -C "$here" branch -r --contains HEAD)" ] || die "push this commit first"
 	[ -z "$(git -C "$tap" status --porcelain)" ] || die "$tap has changes"
 	git -C "$tap" pull --ff-only
 	[ "$(git -C "$tap" rev-parse HEAD)" = "$(git -C "$tap" rev-parse '@{u}')" ] ||

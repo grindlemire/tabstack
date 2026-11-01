@@ -413,3 +413,63 @@ func TestSaveHostManifestConcurrently(t *testing.T) {
 		t.Errorf("registration's mode = %v, want 0644, for the browser to read", info.Mode())
 	}
 }
+
+// Chrome writes some permissions as objects (a settings override, say). One
+// in another extension's list, or tabstack's own, or any other entry this
+// can't read, doesn't hide tabstack.
+func TestFindTabstackOddEntries(t *testing.T) {
+	dir := t.TempDir()
+	writeJSON(t, filepath.Join(dir, "Extensions", storeID, "1.0.0_0", "manifest.json"), map[string]any{"name": extensionName})
+	override := map[string]any{"settings_override": map[string]any{"homepage": "https://example.com"}}
+	writeJSON(t, filepath.Join(dir, "Secure Preferences"), map[string]any{"extensions": map[string]any{"settings": map[string]any{
+		lookalikeID:                        map[string]any{"path": "x", "location": 1, "active_permissions": map[string]any{"api": []any{"tabs", override}}},
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": map[string]any{"location": "unpacked", "state": []int{1}},
+		"cccccccccccccccccccccccccccccccc": "not an object",
+		storeID: map[string]any{"path": storeID + "/1.0.0_0", "location": 1,
+			"active_permissions": map[string]any{"api": []any{override, "nativeMessaging", 5}}},
+	}}})
+	if id, granted := findTabstack(dir); id != storeID || !granted {
+		t.Errorf("findTabstack = %q, %v; want %q, true", id, granted, storeID)
+	}
+}
+
+// A profile the browser recorded in an unexpected shape in Local State
+// keeps its folder's name, and doesn't hide the browser's other profiles.
+func TestProfilesOddLocalState(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		state string
+		want  []profile
+	}{
+		{"a name of the wrong type", `{"profile":{"info_cache":{"Default":{"name":5},"Profile 1":{"name":"Work"}}}}`,
+			[]profile{{dir: "Default", name: "Default"}, {dir: "Profile 1", name: "Work"}}},
+		{"an entry that isn't an object", `{"profile":{"info_cache":{"Default":"Me","Profile 1":{"name":"Work"}}}}`,
+			[]profile{{dir: "Default", name: "Default"}, {dir: "Profile 1", name: "Work"}}},
+		{"no list of them", `{"profile":{"info_cache":[]}}`,
+			[]profile{{dir: "Default", name: "Default"}, {dir: "Profile 1", name: "Profile 1"}}},
+		{"no profile section", `{"profile":5}`,
+			[]profile{{dir: "Default", name: "Default"}, {dir: "Profile 1", name: "Profile 1"}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			data := t.TempDir()
+			for _, dir := range []string{"Default", "Profile 1"} {
+				writeJSON(t, filepath.Join(data, dir, "Preferences"), map[string]any{})
+			}
+			if err := os.WriteFile(filepath.Join(data, "Local State"), []byte(c.state), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := profiles(browser{name: "Test", dataDir: data})
+			if err != nil || !slices.Equal(got, c.want) {
+				t.Errorf("profiles = %+v, %v; want %+v", got, err, c.want)
+			}
+		})
+	}
+	// Local State that isn't JSON at all still says so
+	data := t.TempDir()
+	if err := os.WriteFile(filepath.Join(data, "Local State"), []byte(`{"profile":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := profiles(browser{name: "Test", dataDir: data}); err == nil {
+		t.Error("profiles read a Local State that's cut off")
+	}
+}

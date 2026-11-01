@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -21,6 +22,9 @@ type hubClient struct {
 	peers   []peerInfo
 	version string // the hub's
 	path    string // the hub's helper, where it watches for a new build
+	// why reading stopped: the decoder keeps a read's error, and may have
+	// stopped part way through a message, so c reads no more after one
+	err error
 }
 
 func dialHub(sock string) (*hubClient, error) {
@@ -51,8 +55,12 @@ func watchHub(conn net.Conn) (*hubClient, error) {
 // read takes the hub's next message, keeping up with who's connected.
 func (c *hubClient) read() (message, error) {
 	var m message
+	if c.err != nil {
+		return m, c.err
+	}
 	if err := c.dec.Decode(&m); err != nil {
-		return m, err
+		c.err = fmt.Errorf("reading from the hub: %w", err)
+		return m, c.err
 	}
 	if m.Type == "peers" {
 		c.peers, c.version, c.path = m.Peers, m.Version, m.Path
@@ -79,9 +87,11 @@ type answer struct {
 // ask sends a profile a request, or every profile when to is "*", and
 // gathers the answers until each has answered or the time's up. Profiles
 // match an answer to its request by rid. Once the time's up, c reads no
-// more (the decoder keeps the error, and may have stopped part way through
-// a message), so it's the last thing a command asks of a hub.
+// more, so it's the last thing a command asks of a hub: asking again fails.
 func (c *hubClient) ask(to string, body map[string]any, timeout time.Duration) ([]answer, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
 	want := 1
 	if to == "*" {
 		want = len(c.peers)

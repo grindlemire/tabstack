@@ -100,21 +100,26 @@ func (b browser) key(p profile) string {
 // saves some seconds after a change, so a profile folder it doesn't list yet
 // still counts, named after its folder.
 func profiles(b browser) ([]profile, error) {
+	// each profile read on its own, as findTabstack reads extensions: one
+	// the browser wrote in a way this doesn't expect keeps its folder's name,
+	// and the rest theirs
 	var state struct {
 		Profile struct {
-			InfoCache map[string]struct {
-				Name string `json:"name"`
-			} `json:"info_cache"`
+			InfoCache map[string]json.RawMessage `json:"info_cache"`
 		} `json:"profile"`
 	}
 	if raw, err := os.ReadFile(filepath.Join(b.dataDir, "Local State")); err == nil {
-		if err := json.Unmarshal(raw, &state); err != nil {
+		if err := json.Unmarshal(raw, &state); err != nil && !errors.As(err, new(*json.UnmarshalTypeError)) {
 			return nil, fmt.Errorf("reading %s's Local State: %w", b.name, err)
 		}
 	}
 	names := map[string]string{}
-	for dir, info := range state.Profile.InfoCache {
-		names[dir] = info.Name
+	for dir, raw := range state.Profile.InfoCache {
+		var info struct {
+			Name string `json:"name"`
+		}
+		json.Unmarshal(raw, &info)
+		names[dir] = info.Name // "" for one that isn't read: named after its folder
 	}
 	folders, _ := filepath.Glob(filepath.Join(b.dataDir, "*", "Preferences"))
 	for _, prefs := range folders {
@@ -182,8 +187,28 @@ type extensionSettings struct {
 	// What the extension has now. Not granted_permissions: Chrome keeps a
 	// permission there after it's removed, so asking again needs no prompt.
 	Active struct {
-		API []string `json:"api"`
+		API apiList `json:"api"`
 	} `json:"active_permissions"`
+}
+
+// apiList is an extension's API permissions, by name. Chrome writes some as
+// objects instead (a settings override, say), which are none tabstack asks
+// for, so they're left out.
+type apiList []string
+
+func (l *apiList) UnmarshalJSON(b []byte) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(b, &items); err != nil {
+		return err
+	}
+	*l = nil
+	for _, item := range items {
+		var name string
+		if json.Unmarshal(item, &name) == nil {
+			*l = append(*l, name)
+		}
+	}
+	return nil
 }
 
 // findTabstack looks for an enabled tabstack in a profile's preferences
@@ -200,14 +225,18 @@ func findTabstack(profileDir string) (id string, granted bool) {
 		if err != nil {
 			continue
 		}
+		// each extension read on its own, so one Chrome wrote in a way this
+		// doesn't expect can't hide tabstack
 		var prefs struct {
 			Extensions struct {
-				Settings map[string]extensionSettings `json:"settings"`
+				Settings map[string]json.RawMessage `json:"settings"`
 			} `json:"extensions"`
 		}
-		if json.Unmarshal(raw, &prefs) == nil {
-			for k, v := range prefs.Extensions.Settings {
-				settings[k] = v
+		json.Unmarshal(raw, &prefs)
+		for k, v := range prefs.Extensions.Settings {
+			var s extensionSettings
+			if json.Unmarshal(v, &s) == nil {
+				settings[k] = s
 			}
 		}
 	}
@@ -528,7 +557,7 @@ func connectAll(w io.Writer, home string, targets []target) error {
 			missed = append(missed, t)
 			continue
 		}
-		fmt.Fprintf(w, "  %s: connected, waiting for Done…\n", cmp.Or(peer.Info.Name, t.p.name))
+		fmt.Fprintf(w, "  %s: connected, waiting for Done…\n", printable(cmp.Or(peer.Info.Name, t.p.name)))
 		if peer.Info.Done == nil {
 			// Chrome keeps running the background code tabstack started with,
 			// until it's reloaded, and that code predates Done
@@ -539,7 +568,7 @@ func connectAll(w io.Writer, home string, targets []target) error {
 			fmt.Fprintf(w, "  %s is connected, but Done wasn't clicked; moving on.\n", t.p.name)
 			continue
 		}
-		fmt.Fprintf(w, "  ✓ %s\n", cmp.Or(peer.Info.Name, t.p.name))
+		fmt.Fprintf(w, "  ✓ %s\n", printable(cmp.Or(peer.Info.Name, t.p.name)))
 	}
 	if len(missed) > 0 {
 		for _, t := range missed {
@@ -567,7 +596,8 @@ func waitForPeer(dir, key string, ready func(peerInfo) bool) (peerInfo, bool) {
 }
 
 // openSetup opens tabstack's setup page in one profile, telling it which
-// profile it's in and what the browser calls it.
+// profile it's in and what the browser calls it, and brings the browser
+// forward, which it can't do itself over the terminal (see activate).
 func openSetup(home string, t target, run string) error {
 	q := url.Values{"where": {t.b.key(t.p)}, "name": {t.p.name}, "run": {run}}
 	page := fmt.Sprintf("chrome-extension://%s/setup.html?%s", t.p.id, q.Encode())
@@ -575,7 +605,11 @@ func openSetup(home string, t target, run string) error {
 	if err != nil {
 		return err
 	}
-	return start(exe, append(t.b.args, "--profile-directory="+t.p.dir, page)...)
+	if err := start(exe, append(t.b.args, "--profile-directory="+t.p.dir, page)...); err != nil {
+		return err
+	}
+	activate(home, t.b.exe)
+	return nil
 }
 
 func findExe(home, exe string) (string, error) {
