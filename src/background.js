@@ -3,9 +3,9 @@
 // extensions can't touch, it jumps to the previous tab and continues there.
 // Searching from those pages opens the switcher in the toolbar popup.
 
-// Chrome runs this as a service worker; Firefox lists shared.js before it.
-// Working across profiles (profiles.js) is Chrome only for now.
-if (typeof importScripts === "function") importScripts("shared.js", "icons.js", "profiles.js");
+// The build bundles shared.js, icons.js and profiles.js ahead of this
+// (background/index.ts). Working across profiles (profiles.js) is Chrome
+// only for now.
 
 const { api, isMac, loadSettings, onSettingsChange } = TabstackShared;
 const profiles = globalThis.TabstackProfiles ?? null; // only with the profile helper
@@ -182,7 +182,7 @@ api.runtime.onInstalled.addListener(async () => {
 	for (const tab of tabs) {
 		const inject = (allFrames, files) =>
 			api.scripting.executeScript({ target: { tabId: tab.id, allFrames }, files }).catch(() => {});
-		inject(false, ["shared.js", "ui.js", "content.js"]);
+		inject(false, ["content.js"]);
 		inject(true, ["relay.js"]);
 	}
 });

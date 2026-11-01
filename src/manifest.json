@@ -70,8 +70,6 @@
         "<all_urls>"
       ],
       "js": [
-        "shared.js",
-        "ui.js",
         "content.js"
       ],
       "run_at": "document_start"

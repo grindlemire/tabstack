@@ -1,0 +1,9 @@
+{
+  // The build script and the tests, which run in Bun.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "chrome"]
+  },
+  "include": ["scripts", "src/**/*.test.ts", "src/firefox.d.ts"],
+  "exclude": []
+}
