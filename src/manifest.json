@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "tabstack: recent tab switcher",
   "short_name": "tabstack",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Tap Cmd+J to jump back to your last tab, hold it to flip through recent tabs like Arc, and search with Cmd+Shift+Space.",
   "permissions": [
     "tabs",
