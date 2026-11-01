@@ -117,19 +117,19 @@ The browser tells an extension when a shortcut is pressed, but not when Cmd come
 
 Across profiles, the browser starts the helper over native messaging for each profile's tabstack. The first copy to start becomes the hub, and the others pass their messages through it.
 
-The extension is plain JavaScript with no dependencies, in `src/`:
+The extension is TypeScript with no runtime dependencies, in `src/`:
 
-| File | Job |
+| Path | Job |
 | --- | --- |
-| `background.js` | Tab stack, thumbnails and shortcuts |
-| `content.js`, `ui.js` | The overlay in each page |
-| `relay.js` | Passes keys from iframes to the overlay |
-| `media.js` | Notices a page turning on the microphone or camera, for calls in search (Chrome) |
-| `switcher.js` | Search on browser pages |
-| `settings.js` | The settings popup |
-| `shared.js` | Settings and shortcut helpers every part uses |
-| `profiles.js`, `setup.js` | Working across profiles, and its setup page (Chrome) |
-| `icons.js` | The icons a profile can pick, from [Phosphor](https://phosphoricons.com) |
+| `background/index.ts` | Tab stack, thumbnails and shortcuts |
+| `background/profiles.ts` | Working across profiles (Chrome) |
+| `content/index.ts`, `ui/` | The overlay in each page |
+| `content/relay.ts` | Passes keys from iframes to the overlay |
+| `content/media.ts` | Notices a page turning on the microphone or camera, for calls in search (Chrome) |
+| `pages/switcher/` | Search on browser pages |
+| `pages/settings/` | The settings popup |
+| `pages/setup/` | Setting up profiles (Chrome) |
+| `shared/` | Settings, shortcuts and message types every part uses, and the icons a profile can pick, from [Phosphor](https://phosphoricons.com) |
 
 The helper is Go, in `cmd/tabstack/`.
 
