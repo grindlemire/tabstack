@@ -2,29 +2,36 @@
 // switcher window (pages/switcher). It builds DOM without innerHTML and draws
 // images on canvas, so a page's Trusted Types or img-src CSP can't break it.
 
-import { lightness, markElement } from "../shared/marks";
+import { firstGlyph, lightness, markElement } from "../shared/marks";
 import type {
 	AnswerTo,
 	ClosedItem,
+	Elsewhere,
+	Failed,
 	Item,
 	Label,
 	Mark,
-	Message,
+	MessageOf,
 	ProfileSwitchItem,
+	SearchTabs,
 	SwitchTarget,
 	TabItem,
 } from "../shared/messages";
-import { host, type Range, type Ranked, rank } from "./rank";
+import { host, mergeRanges, type Range, type Ranked, searchResults } from "./rank";
 
 export { rank } from "./rank";
 
 const CARDS = 5;
 const CARD_MAX = 172;
 const CARD_MIN = 120; // narrower than this, show fewer cards instead
-const CARD_GAP = 8; // .cards gap
-const PANEL_INSET = 32 + 26; // page margin, plus the panel's padding and border
+const CARD_GAP = 8;
+const PAGE_MARGIN = 32; // kept clear around the panel, across both sides
+const PANEL_PADDING = 12;
+const PANEL_BORDER = 1;
+const PANEL_INSET = PAGE_MARGIN + 2 * (PANEL_PADDING + PANEL_BORDER);
 const AUTO_SWITCH_DELAY = 150;
-const ROW_BATCH = 50; // search rows built at once; more as the selection nears the end
+const ROW_BATCH = 50; // search rows built at once; more as the selection or the scroll nears the end
+const NEAR_END = 200; // px of rows left below the view when the next batch is built
 
 const STYLE = `
 :host { all: initial; }
@@ -42,9 +49,9 @@ const STYLE = `
 	background: var(--bg);
 	-webkit-backdrop-filter: blur(24px) saturate(1.6);
 	backdrop-filter: blur(24px) saturate(1.6);
-	border: 1px solid var(--line);
+	border: ${PANEL_BORDER}px solid var(--line);
 	border-radius: 16px;
-	padding: 12px;
+	padding: ${PANEL_PADDING}px;
 	box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
 	outline: none;
 }
@@ -64,7 +71,7 @@ const STYLE = `
 	margin: auto;
 	width: max-content;
 	height: max-content;
-	max-width: calc(100vw - 32px);
+	max-width: calc(100vw - ${PAGE_MARGIN}px);
 	overflow: hidden;
 	transition: opacity 110ms ease-out, transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -75,18 +82,18 @@ const STYLE = `
 .panel:not(.searching) .search,
 .panel:not(.searching) .rows,
 .panel.searching .cards { display: none; }
-.panel.searching { width: 560px; max-width: calc(100vw - 32px); }
+.panel.searching { width: 560px; max-width: calc(100vw - ${PAGE_MARGIN}px); }
 /* the popup and the window are already the panel's size */
 .panel.docked.searching { width: auto; max-width: none; }
 
-.cards { position: relative; display: flex; gap: 8px; }
-.card { position: relative; z-index: 1; box-sizing: border-box; width: var(--card-w, 172px); padding: 6px; border-radius: 10px; }
+.cards { position: relative; display: flex; gap: ${CARD_GAP}px; }
+.card { position: relative; z-index: 1; box-sizing: border-box; width: var(--card-w, ${CARD_MAX}px); padding: 6px; border-radius: 10px; }
 .ring {
 	position: absolute;
 	top: 0;
 	bottom: 0;
 	left: 0;
-	width: var(--card-w, 172px);
+	width: var(--card-w, ${CARD_MAX}px);
 	border-radius: 10px;
 	background: var(--card);
 	box-shadow: 0 0 0 2px var(--accent);
@@ -240,24 +247,49 @@ function el<K extends keyof HTMLElementTagNameMap>(
 	return node;
 }
 
-// Decoding data URLs by hand (instead of <img src>) keeps the page's CSP
-// out of it.
+// Adds a stylesheet to a shadow root. Constructed sheets aren't subject to
+// the page's style-src CSP; a <style> element covers browsers where adopting
+// one fails. Either way, a later sheet cascades after an earlier one.
+export function adoptStyle(root: ShadowRoot, css: string): void {
+	try {
+		const sheet = new CSSStyleSheet();
+		sheet.replaceSync(css);
+		root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
+		if (root.adoptedStyleSheets.includes(sheet)) return;
+	} catch {}
+	root.append(el("style", null, css));
+}
+
+// Decoded images, by their data URL, which (unlike a tab's id) can't stand
+// for an older image. Decoding by hand (instead of <img src>) keeps the
+// page's CSP out of it.
 const bitmaps = new Map<string, Promise<ImageBitmap | null>>();
-function bitmapFor(key: string, dataUrl: string): Promise<ImageBitmap | null> {
-	let bitmap = bitmaps.get(key);
+function bitmapFor(dataUrl: string): Promise<ImageBitmap | null> {
+	let bitmap = bitmaps.get(dataUrl);
 	if (!bitmap) {
 		const [head = "", base64 = ""] = dataUrl.split(",");
 		const type = head.slice(5, head.indexOf(";"));
 		const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 		bitmap = createImageBitmap(new Blob([bytes], { type })).catch(() => null);
-		bitmaps.set(key, bitmap);
+		bitmaps.set(dataUrl, bitmap);
 	}
 	return bitmap;
 }
 
-function canvasFor(key: string, dataUrl: string, className: string): HTMLCanvasElement {
+// Lets go of the images none of items shows (all of them, for none). A
+// canvas already waiting on one draws it first.
+function keepBitmaps(items: Item[] = []): void {
+	const keep = new Set(items.flatMap((item) => [item.icon, item.thumb]));
+	for (const [url, bitmap] of bitmaps) {
+		if (keep.has(url)) continue;
+		bitmaps.delete(url);
+		bitmap.then((b) => b?.close());
+	}
+}
+
+function canvasFor(dataUrl: string, className: string): HTMLCanvasElement {
 	const canvas = el("canvas", className);
-	bitmapFor(key, dataUrl).then((bitmap) => {
+	bitmapFor(dataUrl).then((bitmap) => {
 		if (!bitmap) return;
 		canvas.width = bitmap.width;
 		canvas.height = bitmap.height;
@@ -266,9 +298,12 @@ function canvasFor(key: string, dataUrl: string, className: string): HTMLCanvasE
 	return canvas;
 }
 
+// A letter standing in for a missing icon or mark.
+const initial = (text: string | undefined): string => firstGlyph(text ?? "").toUpperCase();
+
 function favicon(item: Item): HTMLElement {
-	if (item.icon) return canvasFor(item.icon, item.icon, "favicon");
-	return el("span", "favicon letter", (host(item.url) || item.title || "?")[0]);
+	if (item.icon) return canvasFor(item.icon, "favicon");
+	return el("span", "favicon letter", initial(host(item.url) || item.title) || "?");
 }
 
 function glyph(className: string, d: string): SVGSVGElement {
@@ -307,21 +342,38 @@ function live(item: Item): SVGSVGElement[] {
 // Text with the matched ranges wrapped in <mark>.
 function marked(text: string, ranges: Range[] | undefined, className: string): HTMLDivElement {
 	const node = el("div", className);
-	const merged = [...(ranges ?? [])]
-		.sort((a, b) => a[0] - b[0])
-		.reduce<Range[]>((out, r) => {
-			const last = out.at(-1);
-			if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
-			else out.push([r[0], r[1]]);
-			return out;
-		}, []);
 	let at = 0;
-	for (const [start, end] of merged) {
+	for (const [start, end] of mergeRanges(ranges ?? [])) {
 		node.append(text.slice(at, start), el("mark", null, text.slice(start, end)));
 		at = end;
 	}
 	node.append(text.slice(at));
 	return node;
+}
+
+// --- what the switcher asks of the background ---
+
+export type CommitMessage = MessageOf<"activate"> | MessageOf<"restore"> | MessageOf<"switchProfile">;
+
+// What choosing an item asks for. profile is set on another profile's items
+// (background/profiles.ts).
+export function commitMessage(item: Item): CommitMessage {
+	if (item.profileSwitch) return { type: "switchProfile", profile: item.profile };
+	if (item.closed) return { type: "restore", sessionId: item.sessionId, profile: item.profile };
+	return { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile };
+}
+
+// The background's answer, or null for a refusal ({ ok: false }) or none
+// (the extension went away).
+export const answered = <T extends object>(answer: T | Failed | undefined): T | null =>
+	answer && !("ok" in answer && answer.ok === false) ? (answer as T) : null;
+
+// Search's lists, however the page asks for them: this profile's tabs, then
+// other profiles', so a slow profile doesn't hold up this one's. null when
+// there are none to give.
+export interface SearchSource {
+	tabs: () => Promise<SearchTabs | null>;
+	elsewhere: () => Promise<Elsewhere | null>;
 }
 
 // --- the switcher ---
@@ -331,9 +383,9 @@ export type Mode = "cycle" | "search";
 export interface SwitcherOptions {
 	// a popover over the page, rather than filling a popup or window
 	popover?: boolean;
-	onCommit: (item: Item) => void;
+	onCommit: (message: CommitMessage) => void;
 	// may answer with the tabs now on top, to fill the gap
-	onCloseTab: (tab: TabItem) => void | Promise<AnswerTo<Extract<Message, { type: "closeTab" }>> | undefined>;
+	onCloseTab: (message: MessageOf<"closeTab">) => void | Promise<AnswerTo<MessageOf<"closeTab">> | undefined>;
 	onClose?: () => void;
 }
 
@@ -356,6 +408,7 @@ export class Switcher {
 	drawn: { tabs?: TabItem[]; width?: number; results?: Ranked<Item>[] } | null;
 	rowNodes: HTMLDivElement[];
 	removed: Set<number>;
+	session: number;
 	autoTimer: ReturnType<typeof setTimeout> | undefined;
 	panel: HTMLDivElement;
 	who: HTMLDivElement;
@@ -384,15 +437,9 @@ export class Switcher {
 		this.drawn = null; // what render() last drew, so select() can patch it
 		this.rowNodes = [];
 		this.removed = new Set(); // tabs closed from the switcher, which a refill mustn't bring back
+		this.session = 0; // counts opens, so an answer for an earlier one is dropped
 
-		// Constructed sheets aren't subject to the page's style-src CSP;
-		// the <style> element covers browsers where adopting one fails.
-		try {
-			const sheet = new CSSStyleSheet();
-			sheet.replaceSync(STYLE);
-			root.adoptedStyleSheets.push(sheet);
-		} catch {}
-		root.append(el("style", null, STYLE));
+		adoptStyle(root, STYLE);
 
 		this.panel = el("div", popover ? "panel" : "panel docked");
 		if (popover) this.panel.popover = "manual";
@@ -401,10 +448,20 @@ export class Switcher {
 		this.input.placeholder = "Search tabs";
 		this.input.spellcheck = false;
 		this.input.autocomplete = "off";
+		this.input.setAttribute("aria-label", "Search tabs");
+		this.input.setAttribute("aria-controls", "rows");
 		this.input.addEventListener("input", () => this.filter());
 		this.cards = el("div", "cards");
 		this.ring = el("div", "ring");
 		this.rows = el("div", "rows");
+		this.rows.id = "rows";
+		this.rows.setAttribute("role", "listbox");
+		this.rows.setAttribute("aria-label", "Tabs");
+		this.rows.addEventListener("scroll", () => {
+			const rows = this.rows;
+			const nearEnd = rows.scrollTop + rows.clientHeight > rows.scrollHeight - NEAR_END;
+			if (nearEnd && this.drawn?.results === this.results) this.appendRows(ROW_BATCH);
+		});
 		this.debug = el("div", "debug");
 		this.panel.append(this.who, this.input, this.cards, this.rows, this.debug);
 		root.append(this.panel);
@@ -430,9 +487,7 @@ export class Switcher {
 			this.who.replaceChildren();
 			return;
 		}
-		const mark = label?.mark
-			? markElement(label.mark, label.mark.path)
-			: el("span", "mark plain", [...name][0]?.toUpperCase());
+		const mark = label?.mark ? markElement(label.mark, label.mark.path) : el("span", "mark plain", initial(name));
 		const switchTo = el("div", "switch-to");
 		switchTo.append(...this.switchTo.map((p) => this.switchChip(p)));
 		this.who.replaceChildren(mark, el("span", "name", name), switchTo);
@@ -442,18 +497,19 @@ export class Switcher {
 	switchChip(p: SwitchTarget): HTMLSpanElement {
 		const chip = el("span", `to${p.windows ? "" : " closed"}`, String(p.n));
 		chip.title = `${p.windows ? "Switch to" : "Open a window in"} ${p.name}`;
-		chip.append(p.mark ? markElement(p.mark, p.mark.path) : el("span", "mark plain", [...p.name][0]?.toUpperCase()));
+		chip.append(p.mark ? markElement(p.mark, p.mark.path) : el("span", "mark plain", initial(p.name)));
 		chip.addEventListener("click", () => this.switchProfile(p));
 		return chip;
 	}
 
 	switchProfile(p: SwitchTarget): void {
-		this.onCommit({ profileSwitch: true, profile: p.profile });
+		this.onCommit(commitMessage({ profileSwitch: true, profile: p.profile }));
 		this.close();
 	}
 
 	open(mode: Mode, tabs: TabItem[], closed: ClosedItem[] = []): void {
 		this.isOpen = true;
+		this.session++;
 		this.mode = mode;
 		this.input.value = "";
 		this.debug.textContent = "";
@@ -469,7 +525,8 @@ export class Switcher {
 	setTabs(tabs: TabItem[], closed: ClosedItem[] = this.closed): void {
 		this.tabs = tabs;
 		this.closed = closed;
-		for (const tab of tabs) if (tab.thumb) bitmapFor(`${tab.id}:${tab.thumb.length}`, tab.thumb);
+		keepBitmaps([...tabs, ...closed]);
+		for (const tab of tabs) if (tab.thumb) bitmapFor(tab.thumb);
 		if (this.mode === "search") this.filter();
 		else this.select(Math.min(1, tabs.length - 1));
 	}
@@ -494,14 +551,30 @@ export class Switcher {
 		this.arriving = null;
 	}
 
+	// Turns to search, from a cycle or as it opens, or just puts the cursor
+	// back in the box when it's already searching.
 	search(): void {
-		this.mode = "search";
-		this.filter();
+		if (this.mode !== "search") {
+			this.mode = "search";
+			this.filter();
+		}
 		this.input.focus();
 	}
 
-	focusInput(): void {
-		this.input.focus();
+	// Fills search from source, this profile's tabs and then other
+	// profiles'. What arrives after the switcher closed, or opened again,
+	// is for a session that's gone, so it's dropped.
+	async load(source: SearchSource): Promise<void> {
+		const session = this.session;
+		const current = () => this.isOpen && this.session === session;
+		const lists = await source.tabs();
+		if (!current() || !lists) return;
+		this.setTabs(lists.tabs, lists.closed);
+		const elsewhere = await source.elsewhere();
+		if (!current() || !elsewhere) return;
+		if (elsewhere.tabs.length || elsewhere.closed.length || elsewhere.profiles.length) {
+			this.addResults(elsewhere.tabs, elsewhere.closed, elsewhere.profiles, elsewhere.marks);
+		}
 	}
 
 	// Cycling covers only the cards on screen, and wraps; older tabs are
@@ -519,10 +592,11 @@ export class Switcher {
 		const drawn = this.drawn;
 		if (this.mode === "cycle" && drawn?.tabs === this.tabs && drawn.width === this.cardLayout().width) {
 			this.ring.style.transform = `translateX(${index * (drawn.width + CARD_GAP)}px)`;
-		} else if (this.mode === "search" && drawn?.results === this.results && index < this.rowNodes.length) {
+		} else if (this.mode === "search" && drawn?.results === this.results) {
+			if (index >= this.rowNodes.length) this.appendRows(index - this.rowNodes.length + ROW_BATCH);
 			this.rowNodes[prev]?.classList.remove("selected");
-			this.rowNodes[index]?.classList.add("selected");
-			this.rowNodes[index]?.scrollIntoView({ block: "nearest" });
+			this.rowNodes[prev]?.setAttribute("aria-selected", "false");
+			this.markSelected();
 		} else {
 			this.render();
 		}
@@ -539,19 +613,7 @@ export class Switcher {
 		const query = this.input.value.trim();
 		this.panel.classList.toggle("typed", !!this.input.value);
 		const kept = keepSelection ? this.results[this.selected]?.item : null;
-		// the tab you're on is never a result; closed tabs and profiles show
-		// once you type, and a profile whose name matches comes first
-		const candidates: Item[] = [...this.tabs.slice(1), ...(query ? [...this.closed, ...this.profiles] : [])];
-		let ranked = rank(candidates, query);
-		// before anything's typed, a call comes first, then what's playing
-		if (!query) {
-			const order = (r: Ranked<Item>) => (r.item.call ? 0 : r.item.audible ? 1 : 2);
-			ranked = ranked
-				.map((r, i) => [r, i] as const)
-				.sort((a, b) => order(a[0]) - order(b[0]) || a[1] - b[1])
-				.map(([r]) => r);
-		}
-		this.results = [...ranked.filter((r) => r.item.profileSwitch), ...ranked.filter((r) => !r.item.profileSwitch)];
+		this.results = searchResults<Item>(this.tabs, this.closed, this.profiles, query);
 		clearTimeout(this.autoTimer);
 		const only = this.results.length === 1 && this.results[0]?.item;
 		if (this.autoSwitch && query && only && !only.closed && !keepSelection) {
@@ -563,7 +625,7 @@ export class Switcher {
 
 	commit(): void {
 		const item = this.items()[this.selected];
-		if (item) this.onCommit(item);
+		if (item) this.onCommit(commitMessage(item));
 		this.close();
 	}
 
@@ -574,7 +636,9 @@ export class Switcher {
 		if (!item || item.closed || item.profileSwitch || item === this.tabs[0]) return;
 		this.removed.add(item.id);
 		// the background answers with the tabs now on top, to fill the gap
-		Promise.resolve(this.onCloseTab(item)).then((reply) => reply && "tabs" in reply && this.addTabs(reply.tabs));
+		Promise.resolve(this.onCloseTab({ type: "closeTab", tabId: item.id, profile: item.profile })).then(
+			(reply) => reply && "tabs" in reply && this.addTabs(reply.tabs),
+		);
 		this.tabs = this.tabs.filter((t) => t !== item);
 		if (this.mode === "search") this.filter({ keepSelection: true });
 		else this.select(Math.min(this.selected, this.items().length - 1));
@@ -587,7 +651,7 @@ export class Switcher {
 		const have = new Set(this.tabs.map((t) => t.id));
 		const extra = tabs.filter((t) => !have.has(t.id) && !this.removed.has(t.id));
 		if (!extra.length) return;
-		for (const tab of extra) if (tab.thumb) bitmapFor(`${tab.id}:${tab.thumb.length}`, tab.thumb);
+		for (const tab of extra) if (tab.thumb) bitmapFor(tab.thumb);
 		this.tabs = [...this.tabs, ...extra];
 		this.select(this.selected);
 	}
@@ -596,6 +660,7 @@ export class Switcher {
 		if (!this.isOpen) return;
 		this.isOpen = false;
 		clearTimeout(this.autoTimer);
+		keepBitmaps();
 		this.onClose?.();
 	}
 
@@ -669,7 +734,7 @@ export class Switcher {
 	}
 
 	thumb(tab: TabItem): HTMLElement {
-		if (tab.thumb) return canvasFor(`${tab.id}:${tab.thumb.length}`, tab.thumb, "thumb");
+		if (tab.thumb) return canvasFor(tab.thumb, "thumb");
 		const empty = el("div", "thumb");
 		empty.append(favicon(tab));
 		return empty;
@@ -678,16 +743,28 @@ export class Switcher {
 	renderRows(): void {
 		this.rowNodes = [];
 		this.drawn = { results: this.results };
+		this.input.removeAttribute("aria-activedescendant");
 		if (!this.results.length) {
 			const query = this.input.value.trim();
 			this.rows.replaceChildren(el("div", "note", this.tabs.length || query ? "No matching tabs" : "Loading tabs…"));
 			return;
 		}
+		this.rows.replaceChildren();
+		this.appendRows(this.selected + ROW_BATCH);
+		this.markSelected();
+	}
+
+	// Builds up to count more rows, below those already built.
+	appendRows(count: number): void {
 		const nodes: HTMLDivElement[] = [];
-		const count = Math.max(ROW_BATCH, this.selected + ROW_BATCH);
-		this.results.slice(0, count).forEach(({ item, marks }, i) => {
+		const from = this.rowNodes.length;
+		this.results.slice(from, from + count).forEach(({ item, marks }, n) => {
+			const i = from + n;
 			if (item.closed && !this.results[i - 1]?.item.closed) nodes.push(el("div", "divider", "Recently closed"));
-			const row = el("div", `row${item.closed ? " closed" : ""}${i === this.selected ? " selected" : ""}`);
+			const row = el("div", `row${item.closed ? " closed" : ""}`);
+			row.id = `row-${i}`;
+			row.setAttribute("role", "option");
+			row.setAttribute("aria-selected", "false");
 			if (this.arriving?.has(item)) row.classList.add("arriving");
 			const text = el("div", "text");
 			text.append(
@@ -713,7 +790,16 @@ export class Switcher {
 			nodes.push(row);
 			this.rowNodes.push(row);
 		});
-		this.rows.replaceChildren(...nodes);
-		this.rows.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
+		this.rows.append(...nodes);
+	}
+
+	// Highlights the selected row, for the eye and for screen readers.
+	markSelected(): void {
+		const row = this.rowNodes[this.selected];
+		if (!row) return;
+		row.classList.add("selected");
+		row.setAttribute("aria-selected", "true");
+		this.input.setAttribute("aria-activedescendant", row.id);
+		row.scrollIntoView({ block: "nearest" });
 	}
 }

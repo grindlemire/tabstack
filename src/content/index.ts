@@ -5,11 +5,11 @@
 
 import { api, isFirefox, isMac } from "../shared/api";
 import { markElement } from "../shared/marks";
-import type { Elsewhere, Label, Message, Modifier, PageMessage, SearchTabs, TabItem, Timing } from "../shared/messages";
+import type { Label, Message, Modifier, PageMessage, Timing } from "../shared/messages";
 import { sendMessage } from "../shared/messages";
 import { DEFAULTS, loadSettings, onSettingsChange, type Settings, watchLabel } from "../shared/settings";
 import { matches } from "../shared/shortcuts";
-import { Switcher } from "../ui";
+import { adoptStyle, answered, Switcher } from "../ui";
 
 declare global {
 	// The live copy's teardown, which the next copy calls (below).
@@ -27,6 +27,8 @@ const MODIFIERS: Record<Modifier, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">
 	Shift: "shiftKey",
 };
 const SHOW_DELAY = 120; // a quick tap switches without flashing the UI
+const COLD_WORKER = 1000; // ms: a service worker younger than this was just started for the shortcut
+const PRESS_RECENT = 3000; // ms: a modifier press older than this wasn't for this switch
 
 // A newer copy of this script (extension reload, or injection into a tab
 // that was already open) tells older copies to stand down. Copies share
@@ -115,11 +117,12 @@ listen(window, "keydown", (e) => {
 	syncModifiers(e);
 	if (e.key in MODIFIERS) modDownAt[e.key] = Date.now();
 
+	// null once it's cleared in Settings: no search key on pages
 	const search = settings.searchShortcut;
 	const searchKey =
 		matches(e, search) ||
 		// while cycling, the search key works with the switch modifier still held
-		(switcher?.isOpen && switcher.mode === "cycle" && e.code === search.code);
+		(switcher?.isOpen && switcher.mode === "cycle" && e.code === search?.code);
 	if (searchKey) {
 		e.preventDefault();
 		e.stopImmediatePropagation();
@@ -138,11 +141,7 @@ listen(window, "keyup", (e) => {
 	if (!alive()) return;
 	hear(e);
 	syncModifiers(e);
-	if (e.key in MODIFIERS) {
-		down.delete(e.key);
-		modUpAt[e.key] = Date.now();
-		onModUp(e.key);
-	}
+	if (e.key in MODIFIERS) released(e.key);
 	if (switcher?.isOpen) e.stopImmediatePropagation();
 });
 
@@ -179,26 +178,25 @@ function ensureSwitcher() {
 		for (const type of ["input", "compositionstart", "compositionupdate", "compositionend"]) {
 			root.addEventListener(type, (e) => e.stopPropagation());
 		}
-		switcher = new Switcher(root, {
-			popover: true,
-			// profile is set on another profile's tabs (background/profiles.ts)
-			onCommit: (item) =>
-				send(
-					item.profileSwitch
-						? { type: "switchProfile", profile: item.profile }
-						: item.closed
-							? { type: "restore", sessionId: item.sessionId, profile: item.profile }
-							: { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile },
-				),
-			onCloseTab: (tab) => send({ type: "closeTab", tabId: tab.id, profile: tab.profile }),
-			onClose: hide,
-		});
+		switcher = new Switcher(root, { popover: true, onCommit: send, onCloseTab: send, onClose: hide });
 		switcher.setProfile(label);
 	}
 	switcher.autoSwitch = settings.autoSwitch;
-	// hostEl is made with the switcher
-	if (!hostEl!.isConnected) (document.body ?? document.documentElement).append(hostEl!);
+	// moving a popover that's showing would hide it
+	// (hostEl is made with the switcher)
+	if (!switcher.isOpen) placeIn(overlayParent(), hostEl!);
 	return switcher;
+}
+
+// A modal <dialog> makes everything outside it inert, which would leave the
+// search box unable to take focus, so the overlay goes inside the dialog
+// while one's open, and back to the body once none is.
+function overlayParent(): Element {
+	return document.querySelector("dialog:modal") ?? document.body ?? document.documentElement;
+}
+
+function placeIn(parent: Element, node: HTMLElement) {
+	if (node.parentNode !== parent) parent.append(node);
 }
 
 // Keys typed while focus sits inside an iframe never reach this frame, so
@@ -240,15 +238,18 @@ async function onCycle(msg: CycleMessage) {
 	if (msg.modifier) modifier = msg.modifier;
 	s.switchCode = msg.switchCode ?? s.switchCode;
 	timing = { ...msg.timing, pageAt: Date.now() };
-	s.open("cycle", msg.tabs ?? ((await send({ type: "tabs" })) as TabItem[] | undefined) ?? []);
+	s.open("cycle", msg.tabs ?? answered(await send({ type: "tabs" })) ?? []);
 	if (msg.selected != null) s.select(msg.selected);
 	send({ type: "open" });
 
-	// We were switched to mid-shortcut from a page tabstack can't run on,
-	// so the modifier went down over there. Count it as held unless it
-	// has already come up here.
+	// This frame never saw the modifier go down when we were switched to
+	// mid-shortcut from a page tabstack can't run on, or when focus is in
+	// an iframe, whose keys go to its own document (relay.ts passes on
+	// only the release). Count it as held unless it has already come up.
 	// (either side missing compares false: still held)
-	const stillHeld = msg.jumped ? !((modUpAt[modifier] as number) >= (msg.timing.commandAt as number)) : held();
+	const inIframe = document.activeElement?.tagName === "IFRAME";
+	const unseen = msg.jumped || inIframe;
+	const stillHeld = unseen ? !((modUpAt[modifier] as number) >= (msg.timing.commandAt as number)) : held();
 	if (!stillHeld) {
 		// the modifier came up before this message arrived (or the page
 		// never saw it go down): it was a quick tap, so just switch
@@ -263,36 +264,50 @@ async function onCycle(msg: CycleMessage) {
 		unheard = true;
 		return;
 	}
+	// An iframe without relay.ts (about:blank ones) never passes the
+	// release on, and it may have come before focus moved up here; the
+	// page's next input carries the modifier's state.
+	if (inIframe) unheard = true;
 	showTimer = setTimeout(show, SHOW_DELAY);
 }
 
-function onModUp(key: string) {
+// The modifier came up, here or (relayed) in an iframe.
+function released(key: string) {
+	modUpAt[key] = Date.now();
 	if (key === modifier && switcher?.isOpen && switcher.mode === "cycle") switcher.commit();
 }
 
 async function openSearch() {
 	const s = ensureSwitcher();
-	const wasOpen = s.isOpen;
-	if (!wasOpen) {
-		prevFocus = document.activeElement as HTMLElement | null;
+	if (s.isOpen && s.mode === "search") {
+		// already searching: keep what's listed, and put the cursor back
+		show();
+		s.search();
+		return;
+	}
+	const fromCycle = s.isOpen;
+	if (!fromCycle) {
 		timing = { pageAt: Date.now() };
 		s.open("search", []);
 		send({ type: "open" });
 	}
+	// where Escape puts focus back; from a cycle, takeFocusFromIframe may
+	// have set it already
+	if (!prevFocus && document.activeElement !== hostEl) prevFocus = document.activeElement as HTMLElement | null;
 	show(); // first: the input can't take focus while the panel is hidden
 	s.search();
 	// search covers every window and recently closed tabs, which a cycle's
-	// list may not have
-	const result = (await send({ type: "tabs", search: true })) as SearchTabs | undefined;
-	if (s.isOpen && result) s.setTabs(result.tabs, result.closed);
-	if (!wasOpen) report({ searchTabsMs: Date.now() - timing!.pageAt });
-	// then other profiles' tabs, when the profile helper is set up
-	if (wasOpen || !result) return;
-	// a refusal ({ ok: false }) has none of these, so it adds nothing
-	const elsewhere = (await send({ type: "tabsElsewhere" })) as Elsewhere | undefined;
-	if (elsewhere?.tabs?.length || elsewhere?.closed?.length || elsewhere?.profiles?.length) {
-		s.addResults(elsewhere.tabs, elsewhere.closed, elsewhere.profiles, elsewhere.marks);
-	}
+	// list may not have, and then other profiles' tabs, when the profile
+	// helper is set up
+	const t = timing;
+	await s.load({
+		tabs: async () => {
+			const lists = answered(await send({ type: "tabs", search: true }));
+			if (!fromCycle && timing === t) report({ searchTabsMs: Date.now() - t!.pageAt });
+			return lists;
+		},
+		elsewhere: async () => answered(await send({ type: "tabsElsewhere" })),
+	});
 }
 
 // --- notices from background/profiles.ts: a link moved here, or a page open elsewhere ---
@@ -367,12 +382,7 @@ function showToast({ id, text, action, mark }: ToastMessage) {
 	hideToast();
 	toastEl = document.createElement("tabstack-toast");
 	const root = toastEl.attachShadow({ mode: "closed" });
-	try {
-		const sheet = new CSSStyleSheet();
-		sheet.replaceSync(TOAST_STYLE);
-		root.adoptedStyleSheets = [sheet];
-	} catch {}
-	root.append(Object.assign(document.createElement("style"), { textContent: TOAST_STYLE }));
+	adoptStyle(root, TOAST_STYLE);
 	const box = document.createElement("div");
 	box.className = "toast";
 	box.popover = "manual";
@@ -388,7 +398,7 @@ function showToast({ id, text, action, mark }: ToastMessage) {
 	if (mark) box.append(markElement(mark, mark.path));
 	box.append(label, go, dismiss);
 	root.append(box);
-	(document.body ?? document.documentElement).append(toastEl);
+	placeIn(overlayParent(), toastEl);
 	box.showPopover();
 	// it stays while the pointer's on it
 	const wait = () => {
@@ -406,7 +416,7 @@ function onMessage(
 ) {
 	if (!alive()) return;
 	if (msg.type === "cycle") onCycle(msg);
-	else if (msg.type === "modUp") onModUp(msg.key);
+	else if (msg.type === "modUp") released(msg.key);
 	else if (msg.type === "search") openSearch();
 	else if (msg.type === "toast") showToast(msg);
 	sendResponse({ ok: true });
@@ -440,11 +450,11 @@ function report(extra: Timing) {
 	if (!settings.showTimings) return;
 	const t = timing;
 	const parts = [];
-	if (t.swAgeMs != null) parts.push(`worker ${t.swAgeMs < 1000 ? "COLD" : "warm"} (age ${t.swAgeMs}ms)`);
+	if (t.swAgeMs != null) parts.push(`worker ${t.swAgeMs < COLD_WORKER ? "COLD" : "warm"} (age ${t.swAgeMs}ms)`);
 	if (t.snapshotMs != null) parts.push(`snapshot ${t.snapshotMs}ms`);
 	if (t.commandAt) parts.push(`worker→page ${t.pageAt - t.commandAt}ms`);
 	const pressedAt = modDownAt[modifier];
-	if (pressedAt && t.pageAt - pressedAt < 3000) parts.push(`modifier down→page ${t.pageAt - pressedAt}ms`);
+	if (pressedAt && t.pageAt - pressedAt < PRESS_RECENT) parts.push(`modifier down→page ${t.pageAt - pressedAt}ms`);
 	if (t.paintMs != null) parts.push(`paint ${t.paintMs}ms`);
 	if (t.searchTabsMs != null) parts.push(`tabs loaded ${t.searchTabsMs}ms`);
 	if (t.jumped) parts.push("jumped from restricted page");

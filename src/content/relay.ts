@@ -27,15 +27,20 @@ import type { Shortcut } from "../shared/shortcuts";
 	const MODIFIERS = ["Meta", "Control", "Alt", "Shift"];
 	const controller = new AbortController();
 
-	let search: Omit<Shortcut, "key"> = { code: "Slash", meta: isMac, ctrl: !isMac, alt: false, shift: false };
-	api.storage.sync.get<{ searchShortcut?: Shortcut }>("searchShortcut").then(
+	// settings.ts's default; null once it's cleared in Settings, for no
+	// search key on pages
+	const DEFAULT: Omit<Shortcut, "key"> = { code: "Slash", meta: isMac, ctrl: !isMac, alt: false, shift: false };
+	let search: Omit<Shortcut, "key"> | null = DEFAULT;
+	api.storage.sync.get<{ searchShortcut?: Shortcut | null }>("searchShortcut").then(
 		(s) => {
-			if (s.searchShortcut) search = s.searchShortcut;
+			if (s.searchShortcut !== undefined) search = s.searchShortcut;
 		},
 		() => {},
 	);
-	api.storage.onChanged.addListener((changes) => {
-		if (changes.searchShortcut) search = (changes.searchShortcut.newValue as Shortcut | undefined) ?? search;
+	api.storage.onChanged.addListener((changes, area) => {
+		if (area !== "sync" || !changes.searchShortcut) return;
+		const value = changes.searchShortcut.newValue as Shortcut | null | undefined;
+		search = value === undefined ? DEFAULT : value;
 	});
 
 	function send(message: RelayedMessage) {
@@ -55,6 +60,7 @@ import type { Shortcut } from "../shared/shortcuts";
 			if (!e.isTrusted) return;
 			sawOtherKey = !MODIFIERS.includes(e.key);
 			const isSearch =
+				!!search &&
 				e.code === search.code &&
 				e.metaKey === search.meta &&
 				e.ctrlKey === search.ctrl &&

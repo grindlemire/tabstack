@@ -13,7 +13,13 @@ export interface Rankable {
 	audible?: boolean;
 }
 
-// [start, end) of a match, in the lowercased text
+// What search lists, and where: a profile to switch to goes first.
+export interface Listed extends Rankable {
+	profileSwitch?: boolean;
+}
+
+// [start, end) of a match, in the lowercased text, which is only kept when
+// it lines up with the text shown
 export type Range = [number, number];
 
 // Where the query matched an item's title and site, to highlight.
@@ -154,6 +160,8 @@ function scoreItem(item: Rankable, words: string[], matchers: Matcher[]): { scor
 	// the words together, in order, beat the same words scattered, and a
 	// whole-word phrase ("page 1") beats a partial one ("page 19")
 	const title = fields[0]?.text ?? "";
+	// a letter whose lowercase is longer ("İ") would shift every mark after it
+	if (title.length !== (item.title ?? "").length) marks.title = [];
 	const phrase = words.join(" ");
 	const at = words.length > 1 ? title.indexOf(phrase) : -1;
 	if (at >= 0) total += BOUNDARY.test(title[at + phrase.length] ?? " ") ? 20 : 15;
@@ -176,4 +184,30 @@ export function rank<T extends Rankable>(items: T[], query: string): Ranked<T>[]
 		}
 	}
 	return [];
+}
+
+// What search lists for a query: the tab you're on (tabs[0]) never; closed
+// tabs and other profiles once something's typed. Before anything's typed, a
+// call comes first, then what's playing. A profile whose name matches goes
+// above every tab.
+export function searchResults<T extends Listed>(tabs: T[], closed: T[], profiles: T[], query: string): Ranked<T>[] {
+	const q = query.trim();
+	const ranked = rank([...tabs.slice(1), ...(q ? [...closed, ...profiles] : [])], q);
+	// (sort is stable, so the rest keep their recency order)
+	const order = (r: Ranked<T>) => (r.item.call ? 0 : r.item.audible ? 1 : 2);
+	if (!q) ranked.sort((a, b) => order(a) - order(b));
+	return [...ranked.filter((r) => r.item.profileSwitch), ...ranked.filter((r) => !r.item.profileSwitch)];
+}
+
+// Ranges in order, with overlapping and touching ones joined, so each run of
+// matched letters is wrapped once.
+export function mergeRanges(ranges: Range[]): Range[] {
+	return [...ranges]
+		.sort((a, b) => a[0] - b[0])
+		.reduce<Range[]>((out, r) => {
+			const last = out.at(-1);
+			if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+			else out.push([r[0], r[1]]);
+			return out;
+		}, []);
 }

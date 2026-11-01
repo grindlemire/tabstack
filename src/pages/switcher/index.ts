@@ -7,9 +7,13 @@
 // the background), and searching doesn't need it to.
 
 import { api } from "../../shared/api";
-import type { Message, PortReply } from "../../shared/messages";
+import type { Elsewhere, Message, PortReply, SearchTabs } from "../../shared/messages";
 import { loadSettings, watchLabel } from "../../shared/settings";
-import { Switcher } from "../../ui";
+import { adoptStyle, Switcher } from "../../ui";
+
+// After a commit, how long to wait for the background to confirm before
+// closing anyway, so closing doesn't drop the message.
+const COMMIT_WAIT = 300;
 
 // A popup sizes itself to the page, so the page sets the width, the same
 // as the search panel's on web pages.
@@ -21,22 +25,13 @@ let committing = false;
 
 const shadow = document.getElementById("root")!.attachShadow({ mode: "open" });
 const switcher = new Switcher(shadow, {
-	onCommit: (item) => {
+	onCommit: (message) => {
 		committing = true;
-		// profile is set on another profile's tabs (the background's profiles module)
-		port.postMessage(
-			(item.profileSwitch
-				? { type: "switchProfile", profile: item.profile }
-				: item.closed
-					? { type: "restore", sessionId: item.sessionId, profile: item.profile }
-					: { type: "activate", tabId: item.id, windowId: item.windowId, profile: item.profile }) satisfies Message,
-		);
+		port.postMessage(message);
 	},
-	onCloseTab: (tab) => port.postMessage({ type: "closeTab", tabId: tab.id, profile: tab.profile } satisfies Message),
+	onCloseTab: (message) => port.postMessage(message),
 	onClose: () => {
-		// after a commit, wait for the background to confirm (or give up) so
-		// closing doesn't drop the message
-		if (committing) setTimeout(() => window.close(), 300);
+		if (committing) setTimeout(() => window.close(), COMMIT_WAIT);
 		else window.close();
 	},
 });
@@ -44,13 +39,13 @@ const switcher = new Switcher(shadow, {
 watchLabel((label) => switcher.setProfile(label));
 
 // The rows' height is tied to the viewport, which a popup doesn't have until
-// it has sized itself.
-if (inPopup)
-	shadow.append(
-		Object.assign(document.createElement("style"), {
-			textContent: ".rows, .panel.named .rows { max-height: 380px; }",
-		}),
-	);
+// it has sized itself. (Adopted after the switcher's own sheet, so it wins.)
+if (inPopup) adoptStyle(shadow, ".rows, .panel.named .rows { max-height: 380px; }");
+
+// The background answers search over the port: this profile's tabs, then
+// other profiles', which only come when there are some.
+let gotTabs: (lists: SearchTabs) => void = () => {};
+let gotMore: (elsewhere: Elsewhere) => void = () => {};
 
 port.onMessage.addListener(async (msg: PortReply) => {
 	if (msg.type === "start") {
@@ -58,12 +53,15 @@ port.onMessage.addListener(async (msg: PortReply) => {
 		switcher.autoSwitch = settings.autoSwitch;
 		switcher.open("search", msg.tabs ?? []);
 		switcher.search();
+		const tabs = new Promise<SearchTabs>((resolve) => (gotTabs = resolve));
+		const elsewhere = new Promise<Elsewhere>((resolve) => (gotMore = resolve));
 		// every window and recently closed tabs, which a cycle's list doesn't have
 		port.postMessage({ type: "search", currentId: switcher.tabs[0]?.id } satisfies Message);
+		switcher.load({ tabs: () => tabs, elsewhere: () => elsewhere });
 	} else if (msg.type === "tabs") {
-		switcher.setTabs(msg.tabs, msg.closed);
+		gotTabs(msg);
 	} else if (msg.type === "moreTabs") {
-		switcher.addResults(msg.tabs, msg.closed, msg.profiles, msg.marks);
+		gotMore(msg);
 	} else if (msg.type === "done") {
 		window.close();
 	}
