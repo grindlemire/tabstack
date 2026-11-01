@@ -6,6 +6,9 @@
 (() => {
 	const api = globalThis.browser ?? globalThis.chrome;
 
+	// Any script on the page can post this, not just media.js, and nothing
+	// tells them apart. All it does is mark the tab as a call in search (a
+	// microphone, ranked first), so a page that fakes it only moves its own tab.
 	addEventListener("message", (e) => {
 		if (e.source !== window || e.data?.tabstack !== "media") return;
 		try {
@@ -36,9 +39,11 @@
 
 	let sawOtherKey = false; // a visible key went down while a modifier was held
 
+	// The page can dispatch keys too, so only the browser's own count.
 	addEventListener(
 		"keydown",
 		(e) => {
+			if (!e.isTrusted) return;
 			sawOtherKey = !MODIFIERS.includes(e.key);
 			const isSearch =
 				e.code === search.code &&
@@ -58,6 +63,7 @@
 	addEventListener(
 		"keyup",
 		(e) => {
+			if (!e.isTrusted) return;
 			// The switch shortcut itself never reaches the page, so a release
 			// with no visible key in between is the only one worth relaying.
 			if (MODIFIERS.includes(e.key) && !sawOtherKey) send({ type: "modUp", key: e.key });

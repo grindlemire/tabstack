@@ -47,6 +47,9 @@ globalThis.TabstackProfiles = (() => {
 
 	const granted = () => api.permissions.contains({ permissions: ["nativeMessaging"] });
 	const others = () => peers.filter((p) => p.profile !== profile);
+	// Incognito tabs stay in this profile: no other profile, nor the command
+	// line, is told of them.
+	const shareableTabs = async () => (await api.tabs.query({})).filter((t) => !t.incognito);
 
 	// What a profile's called: the name it was given, or its place in the list.
 	function nameOf(id) {
@@ -179,7 +182,8 @@ globalThis.TabstackProfiles = (() => {
 
 	async function sendState() {
 		if (!port) return;
-		const windows = await api.windows.getAll({ windowTypes: ["normal"] });
+		// incognito windows aren't counted: they're not for other profiles to switch to
+		const windows = (await api.windows.getAll({ windowTypes: ["normal"] })).filter((w) => !w.incognito);
 		port?.postMessage({
 			type: "state",
 			profile,
@@ -294,7 +298,7 @@ globalThis.TabstackProfiles = (() => {
 		switch (body.kind) {
 			case "tabs": {
 				// every tab, most recently used first, without icons
-				const tabs = await api.tabs.query({});
+				const tabs = await shareableTabs();
 				tabs.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
 				reply(from, body.rid, {
 					tabs: tabs.map((t) => ({ id: t.id, windowId: t.windowId, title: t.title, url: t.url, lastAccessed: t.lastAccessed })),
@@ -304,8 +308,10 @@ globalThis.TabstackProfiles = (() => {
 			case "focus": {
 				let win = await lastWindow();
 				if (body.tabId != null) {
-					const tab = await api.tabs.update(body.tabId, { active: true }).catch(() => null);
-					if (!tab) return reply(from, body.rid, { error: `there's no tab ${body.tabId} here` });
+					// an incognito tab isn't listed, so it isn't here either
+					const tab = await api.tabs.get(body.tabId).catch(() => null);
+					if (!tab || tab.incognito) return reply(from, body.rid, { error: `there's no tab ${body.tabId} here` });
+					await api.tabs.update(tab.id, { active: true }).catch(() => {});
 					win = await api.windows.get(tab.windowId).catch(() => null);
 				}
 				if (!win) return reply(from, body.rid, { error: "it has no window open" });
@@ -341,9 +347,17 @@ globalThis.TabstackProfiles = (() => {
 
 	// --- windows ---
 
-	// This profile's most recent window: the one that comes forward.
-	function lastWindow() {
-		return api.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
+	// This profile's most recent window: the one that comes forward. Never an
+	// incognito one: links from other profiles don't open there, switching
+	// profiles doesn't bring it forward, and its place isn't passed on. When
+	// the last focused window is incognito, it's the window of the tab used
+	// most recently.
+	async function lastWindow() {
+		const win = await api.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
+		if (!win?.incognito) return win;
+		const tabs = (await api.tabs.query({ windowType: "normal" })).filter((t) => !t.incognito);
+		const last = tabs.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
+		return last ? api.windows.get(last.windowId).catch(() => null) : null;
 	}
 
 	// Where the window being left is, so the next one can take its place.
@@ -387,8 +401,9 @@ globalThis.TabstackProfiles = (() => {
 
 	let boundsTimer = 0;
 	api.windows.onBoundsChanged?.addListener((win) => {
-		// only the window in front leads; the others moving to match don't
-		if (!win.focused || !connected || !shared.values.stack) return;
+		// only the window in front leads; the others moving to match don't,
+		// nor does an incognito one
+		if (!win.focused || win.incognito || !connected || !shared.values.stack) return;
 		clearTimeout(boundsTimer);
 		boundsTimer = setTimeout(async () => post("*", { kind: "bounds", frame: await currentFrame() }), BOUNDS_DELAY);
 	});
@@ -417,9 +432,9 @@ globalThis.TabstackProfiles = (() => {
 	// the answer is too big to pass on, then the least recent tabs.
 	async function tabsForSearch() {
 		if (!hooks) return { tabs: [], closed: [] };
-		const [tabs, closed] = await Promise.all([hooks.snapshot(null, { forSearch: true }), hooks.recentlyClosed()]);
+		const [tabs, closed] = await Promise.all([hooks.snapshot(null, { forSearch: true, incognito: false }), hooks.recentlyClosed()]);
 		let answer = { tabs, closed };
-		const size = () => JSON.stringify(answer).length;
+		const size = () => new TextEncoder().encode(JSON.stringify(answer)).length;
 		if (size() > MAX_REPLY) {
 			const bare = (t) => ({ ...t, icon: null });
 			answer = { tabs: tabs.map(bare), closed: closed.map(bare) };
@@ -607,7 +622,7 @@ globalThis.TabstackProfiles = (() => {
 
 	async function findTab(href) {
 		const want = normalize(href);
-		const tab = (await api.tabs.query({})).find((t) => normalize(t.url) === want);
+		const tab = (await shareableTabs()).find((t) => normalize(t.url) === want);
 		return tab ? { id: tab.id, windowId: tab.windowId } : null;
 	}
 
@@ -616,7 +631,7 @@ globalThis.TabstackProfiles = (() => {
 	const dupeChecked = new Set();
 	async function checkDupe(tab) {
 		const opened = createdAt.get(tab.id);
-		if (!opened || Date.now() - opened > DUPE_CHECK_FOR || dupeChecked.has(tab.id)) return;
+		if (tab.incognito || !opened || Date.now() - opened > DUPE_CHECK_FOR || dupeChecked.has(tab.id)) return;
 		if (!connected || !shared.values.dupes || (exempt.get(tab.id) ?? 0) > Date.now()) return;
 		if (!/^https?:/.test(tab.url ?? "")) return;
 		dupeChecked.add(tab.id);
@@ -696,6 +711,7 @@ globalThis.TabstackProfiles = (() => {
 	}
 
 	function onMenu(info, tab) {
+		if (tab?.incognito) return; // nothing incognito goes to another profile
 		const [what, to] = info.menuItemId.split(":");
 		if (what === "link") {
 			openIn(to, info.linkUrl);

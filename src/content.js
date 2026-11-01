@@ -9,12 +9,16 @@
 	const SHOW_DELAY = 120; // a quick tap switches without flashing the UI
 
 	// A newer copy of this script (extension reload, or injection into a tab
-	// that was already open) tells older copies to stand down.
-	const TAKEOVER = "tabstack:takeover";
-	document.dispatchEvent(new CustomEvent(TAKEOVER));
+	// that was already open) tells older copies to stand down. Copies share
+	// this isolated world's global, which the page can't reach, as it could a
+	// DOM event; a copy orphaned into another world stops itself (alive()).
+	globalThis.tabstackTakeover?.();
+	globalThis.tabstackTakeover = teardown;
 	const controller = new AbortController();
+	// Only the browser's own input counts: the page can dispatch keys and
+	// pointer events too, and use them to switch or close any tab.
 	const listen = (target, type, fn, capture = true) =>
-		target.addEventListener(type, fn, { capture, signal: controller.signal });
+		target.addEventListener(type, (e) => e.isTrusted && fn(e), { capture, signal: controller.signal });
 	let dead = false;
 	let switcher = null;
 	let hostEl = null;
@@ -42,8 +46,6 @@
 			teardown();
 		}
 	}
-
-	listen(document, TAKEOVER, teardown, false);
 
 	let settings = DEFAULTS;
 	loadSettings().then((s) => (settings = s));
@@ -128,7 +130,8 @@
 	// since the search box is in a closed shadow root, so a site with
 	// single-key shortcuts (Gmail's c, to compose) takes them, and cancels the
 	// letter. Like keydown and keyup, they stop here while the switcher's open.
-	// (Not input: the search box listens for that itself.)
+	// (Not input: the search box listens for that itself, so it stops at the
+	// shadow root, in ensureSwitcher.)
 	for (const type of ["keypress", "beforeinput"]) {
 		listen(window, type, (e) => {
 			if (switcher?.isOpen) e.stopImmediatePropagation();
@@ -146,7 +149,16 @@
 			hostEl = document.createElement("tabstack-overlay");
 			hostEl.tabIndex = -1;
 			hostEl.style.outline = "none";
-			switcher = new TabstackUI.Switcher(hostEl.attachShadow({ mode: "closed" }), {
+			const root = hostEl.attachShadow({ mode: "closed" });
+			// What's typed in search mustn't reach the page. Input and
+			// composition events cross the shadow root, carrying the text, so
+			// they stop at it, once the search box's own listener has run. A
+			// page listening in the capture phase hears them first; nothing
+			// here can stop that.
+			for (const type of ["input", "compositionstart", "compositionupdate", "compositionend"]) {
+				root.addEventListener(type, (e) => e.stopPropagation());
+			}
+			switcher = new TabstackUI.Switcher(root, {
 				popover: true,
 				// profile is set on another profile's tabs (profiles.js)
 				onCommit: (item) =>
