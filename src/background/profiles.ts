@@ -58,7 +58,7 @@ interface PeerInfo {
 	claims?: string[];
 	where?: string;
 	done?: string;
-	shared?: SharedState;
+	shared?: { values: Partial<SharedSettings>; at: number };
 }
 
 // A connected profile, as the helper lists it.
@@ -189,7 +189,7 @@ export function createProfiles() {
 	function markOf(id: string): Mark | null {
 		const mark = peers.find((p) => p.profile === id)?.info?.mark;
 		if (!mark) return null;
-		const path = mark.icon && ICONS[mark.icon];
+		const path = mark.icon && Object.hasOwn(ICONS, mark.icon) && ICONS[mark.icon];
 		return { ...mark, ...(path && { path }) };
 	}
 
@@ -229,7 +229,7 @@ export function createProfiles() {
 			local = {
 				name: sync.profileName ?? "",
 				mark: sync.profileMark ?? null,
-				claims: sync.profileClaims ?? [],
+				claims: strings(sync.profileClaims),
 				where: profileWhere ?? "",
 				done: setupDone ?? "",
 			};
@@ -361,7 +361,7 @@ export function createProfiles() {
 			connected = true;
 			lastError = "";
 			retryIn = RETRY_FIRST;
-			peers = msg.peers;
+			peers = msg.peers.map((p) => ({ ...p, info: cleanInfo(p.info) }));
 			for (const p of peers) {
 				const theirs = p.info?.shared;
 				if (theirs && theirs.at > shared.at) {
@@ -372,7 +372,7 @@ export function createProfiles() {
 			updateMenus();
 			publishLabel();
 		} else if (msg.type === "msg") {
-			onBody(msg.from, msg.body ?? ({} as PeerBody));
+			onBody(msg.from, msg.body ?? ({} as PeerBody)).catch((e) => console.warn("[tabstack]", e));
 		} else if (msg.type === "reconnect") {
 			// a new helper is installed; connecting again starts it
 			reconnect();
@@ -432,18 +432,20 @@ export function createProfiles() {
 				await present(win, body.frame);
 				return;
 			}
+			// Chrome throws at once, past any catch, on an ID that isn't a number
 			case "activate":
+				if (typeof body.tabId !== "number" || typeof body.windowId !== "number") return;
 				await api.tabs.update(body.tabId, { active: true }).catch(() => {});
 				await present(await api.windows.get(body.windowId).catch(() => null), body.frame);
 				return;
 			case "restore": {
 				const session = await api.sessions.restore(body.sessionId).catch(() => null);
 				const windowId = session?.tab?.windowId ?? session?.window?.id;
-				if (windowId != null) await present(await api.windows.get(windowId), body.frame);
+				if (windowId != null) await present(await api.windows.get(windowId).catch(() => null), body.frame);
 				return;
 			}
 			case "close":
-				api.tabs.remove(body.tabId).catch(() => {});
+				if (typeof body.tabId === "number") api.tabs.remove(body.tabId).catch(() => {});
 				return;
 			case "open":
 				await openHere(from, body);
@@ -477,7 +479,7 @@ export function createProfiles() {
 				let win = await lastWindow();
 				if (body.tabId != null) {
 					// an incognito tab isn't listed, so it isn't here either
-					const tab = await api.tabs.get(body.tabId).catch(() => null);
+					const tab = typeof body.tabId === "number" ? await api.tabs.get(body.tabId).catch(() => null) : null;
 					if (!tab || tab.incognito) return reply(from, body.rid, { error: `there's no tab ${body.tabId} here` });
 					await api.tabs.update(tab.id!, { active: true }).catch(() => {});
 					win = await api.windows.get(tab.windowId).catch(() => null);
@@ -501,13 +503,13 @@ export function createProfiles() {
 				teardown();
 				return;
 			case "rename":
-				await api.storage.sync.set({ profileName: body.name ?? "" });
+				await api.storage.sync.set({ profileName: typeof body.name === "string" ? body.name : "" });
 				return;
 			case "links":
-				await api.storage.sync.set({ profileClaims: body.links ?? [] });
+				await api.storage.sync.set({ profileClaims: strings(body.links) });
 				return;
 			case "reset":
-				await api.storage.sync.set({ profileName: body.name ?? "", profileClaims: [] });
+				await api.storage.sync.set({ profileName: typeof body.name === "string" ? body.name : "", profileClaims: [] });
 				await reconnect();
 				return;
 		}
@@ -649,8 +651,8 @@ export function createProfiles() {
 		if (!shared.values.searchAll) return { tabs, closed, profiles, marks };
 		for (const answer of await ask({ kind: "tabs" })) {
 			const origin = { profile: answer.from, profileName: nameOf(answer.from) };
-			tabs.push(...(answer.tabs ?? []).map((t) => ({ ...t, ...origin })));
-			closed.push(...(answer.closed ?? []).map((t) => ({ ...t, ...origin })));
+			if (Array.isArray(answer.tabs)) tabs.push(...answer.tabs.map((t) => ({ ...t, ...origin })));
+			if (Array.isArray(answer.closed)) closed.push(...answer.closed.map((t) => ({ ...t, ...origin })));
 		}
 		return { tabs, closed, profiles, marks };
 	}
@@ -944,7 +946,7 @@ export function createProfiles() {
 			local.name = (changes.profileName.newValue as string | undefined) ?? "";
 			publishLabel();
 		}
-		if (changes.profileClaims) local.claims = (changes.profileClaims.newValue as string[] | undefined) ?? [];
+		if (changes.profileClaims) local.claims = strings(changes.profileClaims.newValue);
 		if (changes.profileWhere) local.where = (changes.profileWhere.newValue as string | undefined) ?? "";
 		if (changes.setupDone) local.done = (changes.setupDone.newValue as string | undefined) ?? "";
 		sendState();
@@ -1001,3 +1003,48 @@ export function createProfiles() {
 		onToastAction,
 	};
 }
+
+// --- what other profiles say of themselves ---
+//
+// Any process on the computer can join the helper, and what a profile says
+// of itself reaches every other as it was sent. A field of the wrong type
+// would throw in a listener here (owner() runs on every navigation) or in a
+// page drawing a mark, so only what's the right type is kept.
+
+export function cleanInfo(info: unknown): PeerInfo | undefined {
+	if (!isRecord(info)) return undefined;
+	const { name, mark, claims, where, done, shared } = info;
+	return {
+		...(typeof name === "string" && { name }),
+		mark: cleanMark(mark),
+		claims: strings(claims),
+		...(typeof where === "string" && { where }),
+		...(typeof done === "string" && { done }),
+		...(isRecord(shared) &&
+			typeof shared.at === "number" &&
+			isRecord(shared.values) && {
+				shared: {
+					at: shared.at,
+					values: Object.fromEntries(Object.entries(shared.values).filter(([, v]) => typeof v === "boolean")),
+				},
+			}),
+	};
+}
+
+// A mark needs its color; the icon's path comes from this copy's icons (markOf).
+function cleanMark(mark: unknown): Mark | null {
+	if (!isRecord(mark) || typeof mark.color !== "string") return null;
+	const { icon, glyph, color, style } = mark;
+	return {
+		color,
+		...(typeof icon === "string" && { icon }),
+		...(typeof glyph === "string" && { glyph }),
+		...((style === "solid" || style === "clear") && { style }),
+	};
+}
+
+// The strings in a list, or none when it isn't one.
+export const strings = (list: unknown): string[] =>
+	Array.isArray(list) ? list.filter((s): s is string => typeof s === "string") : [];
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

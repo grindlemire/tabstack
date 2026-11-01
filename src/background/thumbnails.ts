@@ -28,8 +28,9 @@ interface Hooks {
 
 export function createThumbnails({ recent, showing }: Hooks) {
 	const thumbs = new Map<number, string>(); // tab id -> data URL
-	const savedThumbs = new Map<string, string>(); // page address (savedKey) -> data URL, from earlier sessions
-	let savedIndex: string[] = []; // page addresses with a saved thumbnail, most recent first
+	const savedThumbs = new Map<string, string>(); // savedKey -> data URL, from earlier sessions
+	const savedKeys = new Map<string, string>(); // page URL -> its savedKey, for pages with a saved thumbnail
+	let savedIndex: string[] = []; // savedKeys of the pages with a saved thumbnail, most recent first
 	const icons = new Map<string, string>(); // icon key -> data URL, or "" when there's none
 	const iconsLoading = new Set<string>();
 	const captureTimers = new Map<number, ReturnType<typeof setTimeout>>(); // window id -> timeout
@@ -58,7 +59,8 @@ export function createThumbnails({ recent, showing }: Hooks) {
 		for (const tab of tabs) iconFor(tab); // fetch any that are missing
 	}
 
-	const thumbFor = (tab: chrome.tabs.Tab) => thumbs.get(tab.id!) ?? savedThumbs.get(savedKey(tab.url) ?? "") ?? null;
+	const thumbFor = (tab: chrome.tabs.Tab) =>
+		thumbs.get(tab.id!) ?? savedThumbs.get(savedKeys.get(tab.url ?? "") ?? "") ?? null;
 
 	function forget(tabId: number) {
 		thumbs.delete(tabId);
@@ -181,15 +183,21 @@ export function createThumbnails({ recent, showing }: Hooks) {
 	// --- kept across restarts ---
 
 	async function loadSaved(urls: (string | undefined)[]) {
-		const keys = urls.map(savedKey).filter((k): k is string => !!k && !savedThumbs.has(k) && savedIndex.includes(k));
+		const keys: string[] = [];
+		for (const [url, key] of await Promise.all(urls.map(async (url) => [url, await savedKey(url)] as const))) {
+			if (!url || !key || !savedIndex.includes(key)) continue;
+			savedKeys.set(url, key);
+			if (!savedThumbs.has(key)) keys.push(key);
+		}
 		if (!keys.length) return;
 		const found = await savedStore("readonly", (store) => keys.map((k) => [k, store.get(k)] as const)).catch(() => []);
 		for (const [key, req] of found) if (req.result) savedThumbs.set(key, req.result);
 	}
 
-	function saveByUrl(url: string | undefined, thumb: string) {
-		const key = savedKey(url);
-		if (!key) return;
+	async function saveByUrl(url: string | undefined, thumb: string) {
+		const key = await savedKey(url);
+		if (!url || !key) return;
+		savedKeys.set(url, key);
 		savedThumbs.set(key, thumb);
 		savedIndex = [key, ...savedIndex.filter((k) => k !== key)];
 		const dropped = savedIndex.splice(SAVED_LIMIT);
@@ -199,6 +207,7 @@ export function createThumbnails({ recent, showing }: Hooks) {
 			for (const k of dropped) store.delete(k);
 		}).catch(() => {});
 		for (const k of dropped) savedThumbs.delete(k);
+		for (const [u, k] of savedKeys) if (dropped.includes(k)) savedKeys.delete(u);
 	}
 
 	// --- refreshing ---
@@ -222,8 +231,9 @@ export function createThumbnails({ recent, showing }: Hooks) {
 			api.alarms.clear(REFRESH_ALARM); // in case the idle event was missed
 			return;
 		}
-		const win = await api.windows.getLastFocused();
-		if (!win.focused) return;
+		// a Mac's Chrome keeps running with no windows, and then this rejects
+		const win = await api.windows.getLastFocused().catch(() => null);
+		if (!win?.focused) return;
 		const [tab] = await api.tabs.query({ active: true, windowId: win.id });
 		if (tab) capture(win.id!, tab.id!);
 	});
@@ -316,16 +326,26 @@ async function blobToDataUrl(blob: Blob) {
 
 // Thumbnails kept across restarts are pictures of where you've been, so they
 // go in the background's own IndexedDB, which content scripts can't reach, as
-// they can storage.local. They're kept by the page's address without its
-// query or fragment, which can carry search terms and tokens.
-const SAVED_INDEX = 0; // savedIndex's key: a number, so no address can be it
-const savedKey = (url: string | undefined) => url?.split(/[?#]/, 1)[0] || null;
+// they can storage.local. They're kept by a SHA-256 of the page's whole
+// address: no address is written down, with search terms or tokens in its
+// query, and pages that differ only by their query each keep their own.
+const SAVED_INDEX = 0; // savedIndex's key: a number, so no savedKey can be it
+export async function savedKey(url: string | undefined): Promise<string | null> {
+	if (!url) return null;
+	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(url)));
+	return Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 let savedDb: Promise<IDBDatabase> | null = null;
 function savedStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => T): Promise<T> {
 	savedDb ??= new Promise<IDBDatabase>((resolve, reject) => {
-		const req = indexedDB.open("tabstack", 1);
-		req.onupgradeneeded = () => req.result.createObjectStore("saved");
+		const req = indexedDB.open("tabstack", 2);
+		// version 1, in builds before 1.2's release, kept them by the address
+		// without its query
+		req.onupgradeneeded = ({ oldVersion }) => {
+			if (oldVersion) req.result.deleteObjectStore("saved");
+			req.result.createObjectStore("saved");
+		};
 		req.onsuccess = () => resolve(req.result);
 		req.onerror = () => reject(req.error);
 	}).catch((e) => {

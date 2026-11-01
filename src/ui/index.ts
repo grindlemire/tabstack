@@ -19,8 +19,6 @@ import type {
 } from "../shared/messages";
 import { host, mergeRanges, type Range, type Ranked, searchResults } from "./rank";
 
-export { rank } from "./rank";
-
 const CARDS = 5;
 const CARD_MAX = 172;
 const CARD_MIN = 120; // narrower than this, show fewer cards instead
@@ -32,6 +30,10 @@ const PANEL_INSET = PAGE_MARGIN + 2 * (PANEL_PADDING + PANEL_BORDER);
 const AUTO_SWITCH_DELAY = 150;
 const ROW_BATCH = 50; // search rows built at once; more as the selection or the scroll nears the end
 const NEAR_END = 200; // px of rows left below the view when the next batch is built
+// A mark's color marks the selection between these lightnesses (marks.ts):
+// paler can't carry white text, and darker is lost on a dark panel.
+const ACCENT_DARKEST = 0.08;
+const ACCENT_PALEST = 0.6;
 
 const STYLE = `
 :host { all: initial; }
@@ -481,7 +483,7 @@ export class Switcher {
 		if (color) {
 			this.panel.style.setProperty("--mark", color);
 			const light = lightness(color);
-			if (light > 0.08 && light < 0.6) this.panel.style.setProperty("--accent", color);
+			if (light > ACCENT_DARKEST && light < ACCENT_PALEST) this.panel.style.setProperty("--accent", color);
 		}
 		if (!name) {
 			this.who.replaceChildren();
@@ -746,7 +748,9 @@ export class Switcher {
 		this.input.removeAttribute("aria-activedescendant");
 		if (!this.results.length) {
 			const query = this.input.value.trim();
-			this.rows.replaceChildren(el("div", "note", this.tabs.length || query ? "No matching tabs" : "Loading tabs…"));
+			const note = el("div", "note", this.tabs.length || query ? "No matching tabs" : "Loading tabs…");
+			note.setAttribute("role", "presentation"); // in a listbox, but not an option
+			this.rows.replaceChildren(note);
 			return;
 		}
 		this.rows.replaceChildren();
@@ -760,7 +764,11 @@ export class Switcher {
 		const from = this.rowNodes.length;
 		this.results.slice(from, from + count).forEach(({ item, marks }, n) => {
 			const i = from + n;
-			if (item.closed && !this.results[i - 1]?.item.closed) nodes.push(el("div", "divider", "Recently closed"));
+			if (item.closed && !this.results[i - 1]?.item.closed) {
+				const divider = el("div", "divider", "Recently closed");
+				divider.setAttribute("role", "presentation");
+				nodes.push(divider);
+			}
 			const row = el("div", `row${item.closed ? " closed" : ""}`);
 			row.id = `row-${i}`;
 			row.setAttribute("role", "option");

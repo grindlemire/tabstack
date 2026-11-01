@@ -164,8 +164,11 @@ api.tabs.onReplaced?.addListener(async (added, removed) => {
 });
 
 // A new document has no overlay, whether or not the old one said it closed.
-api.tabs.onUpdated.addListener((tabId, change) => {
-	if (change.status === "loading") overlayOpen.delete(tabId);
+// Its content script says so when it starts ("started"); a page with none
+// can only be told by its loading. Not every load is a new document:
+// history.pushState and hash changes load too, under the same overlay.
+api.tabs.onUpdated.addListener((tabId, change, tab) => {
+	if (change.status === "loading" && !overlayCanRun(tab.url)) overlayOpen.delete(tabId);
 });
 
 api.runtime.onInstalled.addListener(async ({ reason }) => {
@@ -421,7 +424,8 @@ function openSwitcher(tab: chrome.tabs.Tab, start: Promise<TabItem[]>) {
 }
 
 async function openSwitcherWindow(tab: chrome.tabs.Tab) {
-	const win = await api.windows.get(tab.windowId);
+	// the window it was opened from may have closed since
+	const win: Partial<chrome.windows.Window> = await api.windows.get(tab.windowId).catch(() => ({}));
 	// room for the search box and about ten rows
 	const width = 560;
 	const height = 480;
@@ -581,6 +585,13 @@ const MESSAGES: { [K in MessageType]: Handler<K> } = {
 		run: async (msg, { tabId, frameId }) => {
 			await ready;
 			if (tabId != null) onMedia(tabId, frameId ?? 0, !!msg.live);
+		},
+	},
+	// a new document's content script: no overlay is open there yet
+	started: {
+		from: "page",
+		run: (_msg, { tabId }) => {
+			if (tabId != null) overlayOpen.delete(tabId);
 		},
 	},
 	open: {

@@ -41,14 +41,14 @@ const ENTRIES: Record<string, string> = {
 	"switcher.js": "pages/switcher/index.ts",
 };
 
-// Each page's HTML, and its stylesheet when it has one, as the package names them.
+// Each page's HTML, as the package names it.
 const PAGES = ["settings", "setup", "switcher"];
 
 // Working across profiles (the background's profiles module, setup.html and
 // the helper's optional permissions) is Chrome only for now, and so is
 // media.js. The Firefox background is built again without the profiles
 // module (FIREFOX_BUILD).
-const CHROME_ONLY = ["setup.html", "setup.js", "setup.css", "media.js"];
+const CHROME_ONLY = ["setup.html", "setup.js", "media.js"];
 
 interface Manifest {
 	version: string;
@@ -79,11 +79,7 @@ async function bundle(entry: string, { firefoxBuild = false, dev = false } = {})
 async function buildChrome(dev: boolean): Promise<Manifest> {
 	rmSync(chrome, { recursive: true, force: true });
 	cpSync(join(src, "icons"), join(chrome, "icons"), { recursive: true });
-	for (const page of PAGES) {
-		cpSync(join(src, "pages", page, "index.html"), join(chrome, `${page}.html`));
-		const css = join(src, "pages", page, "index.css");
-		if (existsSync(css)) cpSync(css, join(chrome, `${page}.css`));
-	}
+	for (const page of PAGES) cpSync(join(src, "pages", page, "index.html"), join(chrome, `${page}.html`));
 	// what the settings and setup pages share
 	cpSync(join(src, "pages", "page.css"), join(chrome, "page.css"));
 	await Promise.all(
@@ -107,8 +103,9 @@ async function buildFirefox(chromeManifest: Manifest, dev: boolean): Promise<voi
 		// Firefox files new extensions under the puzzle-piece menu; put the icon
 		// on the toolbar so the red no-shortcut warning is visible
 		browser_action: { ...action, default_area: "navbar" },
-		// no _favicon service in Firefox, so no "favicon" permission
-		permissions: [...permissions.filter((p) => p !== "favicon"), ...host_permissions],
+		// no _favicon service in Firefox, so no "favicon" permission, and no
+		// "scripting": Firefox puts content scripts in tabs already open itself
+		permissions: [...permissions.filter((p) => p !== "favicon" && p !== "scripting"), ...host_permissions],
 		// working across profiles (the profiles module, and the helper's
 		// optional permissions) is Chrome only for now, and so is the popup's
 		// switcher

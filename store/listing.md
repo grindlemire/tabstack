@@ -72,7 +72,7 @@ Reads the title, address and icon of each open tab to show them in the switcher,
 
 **storage**
 ```
-Saves the user's settings, the order the user last visited tabs in, and tab thumbnails, all in extension storage on the user's computer.
+Saves the user's settings, the order the user last visited tabs in, and the current session's tab thumbnails, in extension storage on the user's computer. Thumbnails kept across browser restarts are in the extension's own IndexedDB, also on the user's computer.
 ```
 
 **scripting**
@@ -198,7 +198,7 @@ what changed since the one the store last had.
 - Scrolling search results with the mouse reaches every result, not just the first 50.
 - Screen readers announce search results.
 - A web page can no longer set off tabstack's shortcuts by faking key presses, or turn tabstack off, and what you type in search no longer reaches the page.
-- Thumbnails kept from earlier sessions are stored by page address without the query string.
+- Thumbnails kept from earlier sessions are stored where web pages can't read them, under a hash of the page's address rather than the address itself.
 - Chrome, across profiles: incognito tabs are never shared with other profiles, tabstack reconnects to the helper on its own, and links claimed by port or IPv6 address go to the right profile.
 ```
 
@@ -217,7 +217,7 @@ The first paragraph is about this version, so rewrite it for each upload; the
 rest stays.
 
 ```
-This update asks for no new permissions; the manifest's permissions are the same as 1.1.1's. What changed: the source is now TypeScript, bundled with Bun (source archive attached; build steps below). The content scripts ignore key and pointer events the page dispatches itself (event.isTrusted is false), and relay.js also runs in about:blank frames (match_about_blank) so a key released in an embedded editor reaches the overlay. Thumbnails kept between sessions moved from storage.local to the background's IndexedDB, keyed without query strings. A setting lets the user turn off the on-page search shortcut.
+This update asks for no new permissions, and drops scripting: the background no longer injects content scripts into tabs that were open before installing, since Firefox does that itself. What changed: the source is now TypeScript, bundled with Bun (source archive attached; build steps below). The content scripts ignore key and pointer events the page dispatches itself (event.isTrusted is false), and relay.js also runs in about:blank frames (match_about_blank) so a key released in an embedded editor reaches the overlay. Thumbnails kept between sessions moved from storage.local to the background's IndexedDB, keyed by a SHA-256 hash of the page's address. A setting lets the user turn off the on-page search shortcut.
 
 The source is TypeScript: https://github.com/grindlemire/tabstack. Each part (the background script, the content scripts and each page) is bundled into one plain script, with nothing minified and no third-party libraries; the only packages installed are build tools (TypeScript, Biome and type definitions), pinned in bun.lock. To reproduce the Firefox package, on macOS or Linux with Bun 1.3.6 and zip installed, run "bun install --frozen-lockfile" and then "bun run build" in the source folder. That writes the package to dist/firefox and zips it as dist/tabstack-<version>-firefox.zip. The build script (scripts/build.ts) builds the Chrome package in dist/chrome, copies it to dist/firefox, leaving out setup.html, setup.js and media.js, which only work in Chrome, bundles the background script again without the code for working across Chrome profiles, and rewrites manifest.json for Firefox (Manifest V2, an event-page background, and the gecko id).
 

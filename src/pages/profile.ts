@@ -9,9 +9,10 @@ import { type AnswerTo, type ProfilesStatus, sendMessage } from "../shared/messa
 export const PERMISSIONS: chrome.permissions.Permissions = { permissions: ["nativeMessaging", "contextMenus"] };
 
 // The helper's status, or null when there's none to show: sending failed, or
-// the answer was { ok } (the handler failed, or had nothing to say).
+// the answer was { ok } (the handler failed, or had nothing to say), or
+// nothing at all (no listener answered).
 const statusOf = (answer: AnswerTo<{ type: "profiles" | "profilesConnect" }>): ProfilesStatus | null =>
-	"granted" in answer ? answer : null;
+	answer && typeof answer === "object" && "granted" in answer ? answer : null;
 
 export const profilesStatus = (): Promise<ProfilesStatus | null> =>
 	sendMessage({ type: "profiles" }).then(statusOf, () => null);

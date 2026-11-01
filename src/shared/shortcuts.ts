@@ -13,10 +13,10 @@ export interface Shortcut {
 	shift: boolean;
 }
 
-// A cleared shortcut (null) matches nothing.
-export function matches(e: KeyboardEvent, shortcut: Shortcut | null): boolean {
+// A shortcut turned off (on false, as Settings' searchOnPage) matches nothing.
+export function matches(e: KeyboardEvent, shortcut: Shortcut, on = true): boolean {
 	return (
-		!!shortcut &&
+		on &&
 		e.code === shortcut.code &&
 		e.metaKey === shortcut.meta &&
 		e.ctrlKey === shortcut.ctrl &&
