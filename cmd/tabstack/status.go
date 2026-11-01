@@ -40,7 +40,7 @@ func dialHub(sock string) (*hubClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &hubClient{conn: conn, enc: json.NewEncoder(conn), dec: json.NewDecoder(conn)}
+	c := &hubClient{conn: conn, enc: newEncoder(conn), dec: json.NewDecoder(conn)}
 	conn.SetDeadline(time.Now().Add(time.Second))
 	if err := c.enc.Encode(message{Type: "watch"}); err != nil {
 		conn.Close()

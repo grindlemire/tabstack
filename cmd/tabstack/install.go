@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -148,8 +149,34 @@ func compareDirs(a, b string) int {
 	return strings.Compare(a, b)
 }
 
+// storeID is tabstack's ID in the Chrome Web Store, which Chrome, Brave, Edge
+// and the rest install it from.
+const storeID = "midaldjfdmomndckncoafagdheghjdkl"
+
+// extensionName is the name in tabstack's manifest (src/manifest.json), which
+// tells a copy loaded unpacked apart.
+const extensionName = "tabstack: recent tab switcher"
+
+// Chrome's ManifestLocation for an extension loaded unpacked, from
+// chrome://extensions or with --load-extension.
+const (
+	locationUnpacked    = 4
+	locationCommandLine = 8
+)
+
+// extensionID is what Chrome makes an ID of: 32 letters from a to p.
+var extensionID = regexp.MustCompile(`^[a-p]{32}$`)
+
+func checkExtensionID(id string) error {
+	if !extensionID.MatchString(id) {
+		return errors.New("an extension ID is 32 letters from a to p, as chrome://extensions shows it")
+	}
+	return nil
+}
+
 type extensionSettings struct {
 	Path          string          `json:"path"`
+	Location      int             `json:"location"`
 	State         *int            `json:"state"`
 	DisableReason json.RawMessage `json:"disable_reasons"`
 	// What the extension has now. Not granted_permissions: Chrome keeps a
@@ -160,8 +187,12 @@ type extensionSettings struct {
 }
 
 // findTabstack looks for an enabled tabstack in a profile's preferences
-// (Secure Preferences, or Preferences in older browsers), going by the name
-// in its manifest, so the Web Store build and an unpacked copy both count.
+// (Secure Preferences, or Preferences in older browsers): the Web Store build
+// by its ID, or a copy loaded unpacked by the name in its manifest. Not one
+// from a store that's only named like it: whatever this finds is let in to
+// the helper, and can read and close tabs in every profile. Of the store's
+// and an unpacked copy, it's the unpacked one, which someone loaded into the
+// profile to try out.
 func findTabstack(profileDir string) (id string, granted bool) {
 	settings := map[string]extensionSettings{}
 	for _, file := range []string{"Preferences", "Secure Preferences"} {
@@ -187,25 +218,33 @@ func findTabstack(profileDir string) (id string, granted bool) {
 	slices.Sort(ids)
 	for _, k := range ids {
 		s := settings[k]
-		if s.Path == "" || disabled(s) {
-			continue
-		}
-		dir := s.Path
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(profileDir, "Extensions", dir)
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
-		if err != nil {
-			continue
-		}
-		var m struct {
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(raw, &m) == nil && strings.HasPrefix(strings.ToLower(m.Name), "tabstack") {
+		switch {
+		case disabled(s):
+		case unpackedTabstack(k, s):
 			return k, slices.Contains(s.Active.API, "nativeMessaging")
+		case k == storeID && s.Path != "":
+			id, granted = k, slices.Contains(s.Active.API, "nativeMessaging")
 		}
 	}
-	return "", false
+	return id, granted
+}
+
+// unpackedTabstack reports whether an extension is tabstack loaded unpacked,
+// which Chrome records by its location and the absolute path it was loaded
+// from.
+func unpackedTabstack(id string, s extensionSettings) bool {
+	if !extensionID.MatchString(id) || !filepath.IsAbs(s.Path) ||
+		s.Location != locationUnpacked && s.Location != locationCommandLine {
+		return false
+	}
+	raw, err := os.ReadFile(filepath.Join(s.Path, "manifest.json"))
+	if err != nil {
+		return false
+	}
+	var m struct {
+		Name string `json:"name"`
+	}
+	return json.Unmarshal(raw, &m) == nil && m.Name == extensionName
 }
 
 // disabled reads both ways browsers have recorded it: a list of reasons, or

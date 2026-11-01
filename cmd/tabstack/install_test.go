@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,13 +38,13 @@ func TestProfiles(t *testing.T) {
 	})
 
 	// Default: the Web Store build, under the profile's Extensions folder
-	writeJSON(t, filepath.Join(data, "Default", "Extensions", "storeid", "1.0.0_0", "manifest.json"), map[string]any{"name": "tabstack: recent tab switcher"})
+	writeJSON(t, filepath.Join(data, "Default", "Extensions", storeID, "1.0.0_0", "manifest.json"), map[string]any{"name": "tabstack: recent tab switcher"})
 	writeJSON(t, filepath.Join(data, "Default", "Secure Preferences"), map[string]any{"extensions": map[string]any{"settings": map[string]any{
-		"storeid": map[string]any{"path": "storeid/1.0.0_0", "active_permissions": map[string]any{"api": []string{"tabs", "nativeMessaging"}}},
+		storeID: map[string]any{"path": storeID + "/1.0.0_0", "location": 1, "active_permissions": map[string]any{"api": []string{"tabs", "nativeMessaging"}}},
 	}}})
 	// Profile 2: unpacked but turned off, so it doesn't count
 	writeJSON(t, filepath.Join(data, "Profile 2", "Secure Preferences"), map[string]any{"extensions": map[string]any{"settings": map[string]any{
-		"unpackedid": map[string]any{"path": unpacked, "disable_reasons": []int{1}},
+		unpackedID: map[string]any{"path": unpacked, "location": locationUnpacked, "disable_reasons": []int{1}},
 	}}})
 	// Profile 10 had the permission once: Chrome keeps it in granted_permissions
 	// after it's removed, but it's not active, so it doesn't count
@@ -51,8 +53,9 @@ func TestProfiles(t *testing.T) {
 	writeJSON(t, filepath.Join(other, "manifest.json"), map[string]any{"name": "Some other extension"})
 	writeJSON(t, filepath.Join(data, "Profile 10", "Preferences"), map[string]any{"extensions": map[string]any{"settings": map[string]any{
 		"aaaother": map[string]any{"path": other},
-		"unpackedid": map[string]any{
+		unpackedID: map[string]any{
 			"path":                unpacked,
+			"location":            locationUnpacked,
 			"disable_reasons":     []int{},
 			"granted_permissions": map[string]any{"api": []string{"nativeMessaging"}},
 			"active_permissions":  map[string]any{"api": []string{"tabs"}},
@@ -64,12 +67,134 @@ func TestProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []profile{
-		{dir: "Default", name: "Personal", id: "storeid", granted: true},
+		{dir: "Default", name: "Personal", id: storeID, granted: true},
 		{dir: "Profile 2", name: "Work"},
-		{dir: "Profile 10", name: "Side", id: "unpackedid"},
+		{dir: "Profile 10", name: "Side", id: unpackedID},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("profiles =\n  %+v\nwant\n  %+v", got, want)
+	}
+}
+
+const (
+	unpackedID  = "abcdefghijklmnopabcdefghijklmnop"
+	lookalikeID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // sorts before the others
+)
+
+// ext is an extension in a profile, as findTabstack sees it.
+type ext struct {
+	id       string
+	name     string // in its manifest
+	location int    // 1 from a store, 4 unpacked, 8 from --load-extension
+	off      bool
+	granted  bool
+}
+
+// Only the Web Store build, by its ID, and copies loaded unpacked, by their
+// name, are tabstack. Anything else could be anyone's, and what's found gets
+// to read and close tabs in every profile.
+func TestFindTabstack(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		exts        []ext
+		want        string
+		wantGranted bool
+	}{
+		{"the store build", []ext{{id: storeID, name: extensionName, location: 1, granted: true}}, storeID, true},
+		{"the store build, whatever it's called", []ext{{id: storeID, name: "__MSG_name__", location: 1}}, storeID, false},
+		{"unpacked", []ext{{id: unpackedID, name: extensionName, location: 4, granted: true}}, unpackedID, true},
+		{"from --load-extension", []ext{{id: unpackedID, name: extensionName, location: 8}}, unpackedID, false},
+		{"turned off", []ext{{id: storeID, name: extensionName, location: 1, off: true}}, "", false},
+		{"a lookalike from a store", []ext{{id: lookalikeID, name: "TabStack Pro", location: 1}}, "", false},
+		{"tabstack's name, from a store", []ext{{id: lookalikeID, name: extensionName, location: 1}}, "", false},
+		{"unpacked, named like tabstack", []ext{{id: lookalikeID, name: "tabstack: recent tab switcher pro", location: 4}}, "", false},
+		{"unpacked, with no location", []ext{{id: unpackedID, name: extensionName}}, "", false},
+		{"unpacked, under an ID that isn't one", []ext{{id: "unpackedid", name: extensionName, location: 4}}, "", false},
+		{"a lookalike sorted first doesn't shadow it", []ext{
+			{id: lookalikeID, name: "TabStack Pro", location: 1, granted: true},
+			{id: storeID, name: extensionName, location: 1},
+		}, storeID, false},
+		{"unpacked beside the store's", []ext{
+			{id: storeID, name: extensionName, location: 1, granted: true},
+			{id: unpackedID, name: extensionName, location: 4},
+		}, unpackedID, false},
+		{"unpacked but off, beside the store's", []ext{
+			{id: storeID, name: extensionName, location: 1, granted: true},
+			{id: unpackedID, name: extensionName, location: 4, off: true},
+		}, storeID, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			settings := map[string]any{}
+			for _, e := range c.exts {
+				// a store's under the profile's Extensions folder, by a path
+				// relative to it; an unpacked one wherever it was loaded from
+				path := e.id + "/1.0.0_0"
+				manifest := filepath.Join(dir, "Extensions", path, "manifest.json")
+				if e.location != 1 {
+					path = filepath.Join(t.TempDir(), "src")
+					manifest = filepath.Join(path, "manifest.json")
+				}
+				writeJSON(t, manifest, map[string]any{"name": e.name})
+				s := map[string]any{"path": path}
+				if e.location != 0 {
+					s["location"] = e.location
+				}
+				if e.off {
+					s["disable_reasons"] = []int{1}
+				}
+				if e.granted {
+					s["active_permissions"] = map[string]any{"api": []string{"nativeMessaging"}}
+				}
+				settings[e.id] = s
+			}
+			writeJSON(t, filepath.Join(dir, "Secure Preferences"), map[string]any{"extensions": map[string]any{"settings": settings}})
+			if id, granted := findTabstack(dir); id != c.want || granted != c.wantGranted {
+				t.Errorf("findTabstack = %q, %v; want %q, %v", id, granted, c.want, c.wantGranted)
+			}
+		})
+	}
+}
+
+// An unpacked copy is known by the name in tabstack's manifest.
+func TestExtensionName(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "src", "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Name != extensionName {
+		t.Errorf("src/manifest.json names tabstack %q, but install looks for %q", m.Name, extensionName)
+	}
+}
+
+// install lets in an ID it's given only if it's one.
+func TestExtensionIDFlag(t *testing.T) {
+	for _, id := range []string{
+		"",
+		"abc",
+		"abcdefghijklmnopabcdefghijklmno",   // 31
+		"abcdefghijklmnopabcdefghijklmnopa", // 33
+		"qbcdefghijklmnopabcdefghijklmnop",  // q is past p
+		"ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP",
+		"chrome-extension://" + storeID + "/",
+		storeID + "/",
+		storeID + "\n",
+	} {
+		err := run([]string{"install", "--extension-id", id}, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "32 letters from a to p") {
+			t.Errorf("install --extension-id %q: %v, want it refused", id, err)
+		}
+	}
+	for _, id := range []string{storeID, unpackedID} {
+		if err := checkExtensionID(id); err != nil {
+			t.Errorf("checkExtensionID(%q) = %v", id, err)
+		}
 	}
 }
 

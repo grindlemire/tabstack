@@ -1,9 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -95,7 +97,7 @@ func (h *hub) serve(ln net.Listener) {
 }
 
 func (h *hub) handle(conn net.Conn) {
-	p := &peer{conn: conn, enc: json.NewEncoder(conn)}
+	p := &peer{conn: conn, enc: newEncoder(conn)}
 	h.mu.Lock()
 	h.peers[p] = true
 	h.mu.Unlock()
@@ -229,11 +231,24 @@ func (h *hub) watchExe() {
 	}
 }
 
+// write sends a peer a message. One that fails can leave part of it on the
+// connection, and whatever followed would be read as part of it, so the
+// connection's closed instead: the peer's helper joins again, from scratch.
 func (h *hub) write(p *peer, m message) {
 	p.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if err := p.enc.Encode(m); err != nil {
-		log.Printf("hub: writing to %s: %v", p.profile, err)
+		log.Printf("hub: writing to %s: %v", cmp.Or(p.profile, p.cli), err)
+		p.conn.Close()
 	}
+}
+
+// newEncoder writes messages as they came. By default an encoder escapes
+// &, < and > in bodies, making them up to six times longer, and a reply the
+// extension sized to fit the browser's limit would no longer fit.
+func newEncoder(w io.Writer) *json.Encoder {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return enc
 }
 
 // sorted lists the profiles that have said who they are, in a fixed order.

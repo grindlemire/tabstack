@@ -46,10 +46,11 @@ Usage:
 
 A <profile> is its number from list, its name, or its folder ("Profile 1").
 
-install finds tabstack by its name in each profile of Chrome, Brave, Edge,
-Chromium and Vivaldi. For a copy it can't find, pass --extension-id with the ID
-from chrome://extensions (repeatable). Connecting needs one click in each
-profile, since Chrome only grants the permission there.
+install finds tabstack, from the Chrome Web Store or loaded unpacked, in each
+profile of Chrome, Brave, Edge, Chromium and Vivaldi. For a copy it can't find,
+pass --extension-id with the ID from chrome://extensions (repeatable).
+Connecting needs one click in each profile, since Chrome only grants the
+permission there.
 `
 
 func main() {
@@ -75,6 +76,9 @@ func run(args []string, stdout io.Writer) error {
 		var ids []string
 		fs := flag.NewFlagSet("install", flag.ContinueOnError)
 		fs.Func("extension-id", "allow this extension ID (repeatable)", func(s string) error {
+			if err := checkExtensionID(s); err != nil {
+				return err
+			}
 			ids = append(ids, s)
 			return nil
 		})
