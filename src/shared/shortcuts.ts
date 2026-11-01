@@ -13,8 +13,10 @@ export interface Shortcut {
 	shift: boolean;
 }
 
-export function matches(e: KeyboardEvent, shortcut: Shortcut): boolean {
+// A cleared shortcut (null) matches nothing.
+export function matches(e: KeyboardEvent, shortcut: Shortcut | null): boolean {
 	return (
+		!!shortcut &&
 		e.code === shortcut.code &&
 		e.metaKey === shortcut.meta &&
 		e.ctrlKey === shortcut.ctrl &&
@@ -51,7 +53,8 @@ export function fromEvent(e: KeyboardEvent): Shortcut | null {
 	};
 }
 
-export function format(s: Shortcut): string {
-	if (isMac) return `${s.ctrl ? "⌃" : ""}${s.alt ? "⌥" : ""}${s.shift ? "⇧" : ""}${s.meta ? "⌘" : ""}${s.key}`;
+// As the platform shows it: ⇧⌘K on a Mac, Ctrl+Shift+K elsewhere.
+export function format(s: Shortcut, mac = isMac): string {
+	if (mac) return `${s.ctrl ? "⌃" : ""}${s.alt ? "⌥" : ""}${s.shift ? "⇧" : ""}${s.meta ? "⌘" : ""}${s.key}`;
 	return [s.ctrl && "Ctrl", s.alt && "Alt", s.shift && "Shift", s.meta && "Meta", s.key].filter(Boolean).join("+");
 }

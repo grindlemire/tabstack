@@ -56,6 +56,8 @@ Click the toolbar icon to change the shortcuts and a few switches:
 
 Chrome doesn't let an extension change its own shortcuts, so there Change opens `chrome://extensions/shortcuts`. In Firefox you record the new one right in the popup. The toolbar icon turns red when another extension already has Cmd+J.
 
+Cmd+/, search on web pages, is tabstack's own, so you record a new one in the popup in either browser. Clear turns it off, for sites that want the key themselves, like code editors that comment out a line with it.
+
 <p align="center">
   <img src="store/screenshot-4-settings.png" width="560" alt="The settings popup, with the shortcuts drawn as keycaps above four switches">
 </p>

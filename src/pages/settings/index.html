@@ -3,53 +3,28 @@
 	<head>
 		<meta charset="utf-8" />
 		<title>tabstack settings</title>
+		<!-- what this page shares with setup.html, from src/pages/page.css -->
+		<link rel="stylesheet" href="page.css" />
 		<style>
-			/* System fonts only: tabstack makes no network requests, fonts included. */
 			:root {
-				--bg: #f5f5f7;
-				--group: #ffffff;
-				--fg: #1d1d1f;
-				--muted: #86868b;
-				--line: rgba(0, 0, 0, 0.08);
-				--cap-top: #ffffff;
-				--cap-bottom: #f0f0f3;
-				--cap-edge: rgba(0, 0, 0, 0.16);
 				--track: rgba(0, 0, 0, 0.2);
-				--accent: #3b6cf6;
-				--accent-soft: rgba(59, 108, 246, 0.12);
 				--hover: rgba(0, 0, 0, 0.035);
-				--error: #d93025;
-				color-scheme: light dark;
+				/* settings.js waits these out before hiding or unsizing what they move */
+				--leave: 0.16s;
+				--resize: 0.3s;
 			}
 			@media (prefers-color-scheme: dark) {
 				:root {
-					--bg: #18181a;
-					--group: #242427;
-					--fg: #f5f5f7;
-					--muted: #8e8e93;
-					--line: rgba(255, 255, 255, 0.08);
-					--cap-top: #3a3a3e;
-					--cap-bottom: #2e2e32;
-					--cap-edge: rgba(0, 0, 0, 0.5);
 					--track: rgba(255, 255, 255, 0.16);
-					--accent: #5b85ff;
-					--accent-soft: rgba(91, 133, 255, 0.16);
 					--hover: rgba(255, 255, 255, 0.04);
-					--error: #ff6b5b;
 				}
 			}
 
-			* { box-sizing: border-box; }
-			/* elements laid out with display: flex would show anyway */
-			[hidden] { display: none !important; }
 			body {
 				width: 400px;
-				margin: 0;
 				padding: 14px 14px 14px;
-				font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-				color: var(--fg);
-				background: var(--bg);
-				-webkit-font-smoothing: antialiased;
+				font-size: 13px;
+				line-height: 1.35;
 			}
 
 			/* Chrome makes a popup no taller than 600px. The page itself never
@@ -115,21 +90,9 @@
 			.label { flex: 1; min-width: 0; }
 			.label small { display: block; margin-top: 1px; font-size: 11px; color: var(--muted); }
 
-			/* a shortcut, one keycap per key */
-			.keys { display: inline-flex; gap: 3px; font-size: 11.5px; color: var(--muted); }
-			.keys kbd {
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				min-width: 21px;
-				height: 21px;
-				padding: 0 5px;
-				font: 500 11.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-				color: var(--fg);
-				background: linear-gradient(var(--cap-top), var(--cap-bottom));
-				border-radius: 5px;
-				box-shadow: 0 0 0 0.5px var(--cap-edge), 0 1px 0 var(--cap-edge);
-			}
+			/* a shortcut, one keycap per key, a size smaller than setup.html's */
+			.keys { font-size: 11.5px; color: var(--muted); }
+			.keys kbd { min-width: 21px; height: 21px; font-size: 11.5px; }
 			.keys.missing { color: var(--error); font-weight: 500; }
 			.keys.recording {
 				padding: 2px 8px;
@@ -143,22 +106,16 @@
 			button {
 				padding: 3px 6px;
 				margin-right: -6px;
-				font: inherit;
 				font-size: 12.5px;
-				font-weight: 500;
-				color: var(--accent);
 				background: none;
-				border: 0;
 				border-radius: 6px;
-				cursor: pointer;
 			}
 			button:hover { background: var(--accent-soft); }
-			button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-			#search-reset { color: var(--muted); margin-right: -2px; }
+			button:focus-visible { outline-offset: 1px; }
+			:is(#search-reset, #search-clear) { color: var(--muted); margin-right: -2px; }
 
 			.note { min-height: 0; margin: 6px 12px 0; font-size: 11.5px; color: var(--muted); }
 			.note:empty { display: none; }
-			.note.error { color: var(--error); }
 
 			/* switches in place of checkboxes */
 			label.row { cursor: pointer; }
@@ -190,20 +147,10 @@
 			input[type="checkbox"]:checked::before { transform: translateX(13px); }
 			input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-			/* text fields in rows: the profile's name, and its links */
-			input[type="text"], textarea {
-				font: inherit;
-				color: var(--fg);
-				background: var(--bg);
-				border: 1px solid var(--line);
-				border-radius: 7px;
-				outline: none;
-			}
-			input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
+			input[type="text"], textarea { border-radius: 7px; }
 			input[type="text"] { width: 130px; padding: 4px 8px; }
 			.row.stacked { flex-direction: column; align-items: stretch; gap: 6px; }
 			textarea { width: 100%; padding: 6px 8px; resize: vertical; font: 12px/1.5 ui-monospace, Menlo, monospace; }
-			.row[hidden] { display: none; }
 			.keys.unset { color: var(--muted); }
 			#profile-keys { gap: 8px; }
 			#profiles-off { margin: 0 0 0 -6px; font-size: 11.5px; color: var(--muted); }
@@ -249,7 +196,7 @@
 			.status { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--muted); }
 			.status span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 			.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--error); transition: background 0.3s ease; }
-			.dot.ok { background: #30a46c; }
+			.dot.ok { background: var(--ok); }
 			/* trying to reach the helper */
 			.dot.busy { background: var(--muted); animation: pulse 0.9s ease-in-out infinite; }
 			#profiles-detail { font-size: 11.5px; color: var(--muted); }
@@ -306,7 +253,7 @@
 				right: 6px;
 				font-size: 11px;
 				font-weight: 500;
-				color: #30a46c;
+				color: var(--ok);
 				opacity: 0;
 				transform: translateY(-50%);
 				pointer-events: none;
@@ -324,15 +271,12 @@
 
 			/* each tab is as tall as it needs; switching eases the popup from one height to the other */
 			.panels > .inactive { display: none; }
-			.panels.resizing { overflow: hidden; transition: height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+			.panels.resizing { overflow: hidden; transition: height var(--resize) cubic-bezier(0.2, 0.8, 0.2, 1); }
 
-			/* a shortcut just set pops in a key at a time; one that won't do shakes */
+			/* a shortcut just set pops in a key at a time; one that won't do shakes (page.css) */
 			.keys kbd.pop { animation: key-pop 0.28s cubic-bezier(0.3, 1.4, 0.5, 1) both; }
 			@keyframes key-pop { from { opacity: 0; transform: translateY(3px) scale(0.8); } }
-			.keys.shake { animation: shake 0.34s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
-			@keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
 
-			/* the picker's page */
 			/* a page of its own over the settings: the icon picker */
 			body.picking > :not(.view) { display: none !important; }
 			.view-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 0 12px; }
@@ -452,7 +396,6 @@
 			body:not(.settled) :is(section:nth-of-type(1), .identity) { animation-delay: 0.04s; }
 			body:not(.settled) section:nth-of-type(2) { animation-delay: 0.08s; }
 			body:not(.settled) :is(section:nth-of-type(3), .ad) { animation-delay: 0.12s; }
-			@keyframes rise { from { opacity: 0; transform: translateY(4px); } }
 
 			/* between tabs and pages, what comes in slides from the side it sits on */
 			.from-right { animation: from-right 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
@@ -460,11 +403,9 @@
 			@keyframes from-right { from { opacity: 0; transform: translateX(16px); } }
 			@keyframes from-left { from { opacity: 0; transform: translateX(-16px); } }
 
-			/* a row or notice that comes and goes */
-			.appear { animation: appear 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-			/* over the opening rise, which a notice can still be in */
-			.leaving { animation: leave 0.16s ease-in both !important; pointer-events: none; }
-			@keyframes appear { from { opacity: 0; transform: translateY(-4px); } }
+			/* a row or notice that goes, as .appear (page.css) brings it, over the
+			   opening rise, which a notice can still be in */
+			.leaving { animation: leave var(--leave) ease-in both !important; pointer-events: none; }
 			@keyframes leave { to { opacity: 0; transform: scale(0.98); } }
 
 			/* the picker's preview, each time it changes */
@@ -476,7 +417,7 @@
 			#mark-open:active .mark { transform: scale(0.96); }
 
 			@media (prefers-reduced-motion: reduce) {
-				body :is(header, section, .ad, .identity), .keys.recording, .keys kbd.pop, .keys.shake, .from-right, .from-left, .appear, .leaving, #mark-big > * { animation: none !important; }
+				body :is(header, section, .ad, .identity), .keys.recording, .keys kbd.pop, .from-right, .from-left, .leaving, #mark-big > * { animation: none !important; }
 				input[type="checkbox"], input[type="checkbox"]::before, .segmented::before, .segmented button { transition: none; }
 				.glyphs button:active, .swatches button:active, #mark-open:active .mark, #mark-open:hover .mark, button.peer:is(:hover, :active) .mark { transform: none; }
 			}
@@ -519,6 +460,8 @@
 							<span class="label">Also search with<small>Web pages only</small></span>
 							<span class="keys" id="search-key"></span>
 							<button id="search-reset" hidden>Reset</button>
+							<!-- for pages that want the key themselves, like ⌘/ commenting out code in an editor -->
+							<button id="search-clear" title="Turn this shortcut off, so pages get the key">Clear</button>
 							<button id="search-change">Change</button>
 						</div>
 					</div>
@@ -651,7 +594,6 @@
 			<div class="glyphs" id="mark-glyphs" role="group" aria-label="Icon"></div>
 			<p class="note" id="mark-empty" hidden>No icons match. Type a single letter or number to use it instead.</p>
 		</div>
-
 
 		<!-- this folder's index.ts, bundled by scripts/build.ts -->
 		<script src="settings.js"></script>

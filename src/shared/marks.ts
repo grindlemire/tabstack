@@ -14,6 +14,10 @@ export function iconSvg(path: string): SVGSVGElement {
 	return svg;
 }
 
+// The first character as you'd count it, so an accented letter stays whole:
+// a profile with no mark shows its name's.
+export const firstGlyph = (text: string): string => [...new Intl.Segmenter().segment(text)][0]?.segment ?? "";
+
 // How light a #rrggbb color looks, from 0 (black) to 1 (white).
 export function lightness(color: string): number {
 	const [r = 0, g = 0, b = 0] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) / 255);

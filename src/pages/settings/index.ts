@@ -1,13 +1,14 @@
 // Toolbar popup: shortcuts and options.
 
 import { api, isFirefox, isMac } from "../../shared/api";
-import { ICONS } from "../../shared/icons";
-import { iconSvg, inkOn, markElement } from "../../shared/marks";
+import { firstGlyph, markElement } from "../../shared/marks";
 import { type Mark, type PeerRow, type ProfilesStatus, type SharedSettings, sendMessage } from "../../shared/messages";
 import { DEFAULTS, loadSettings } from "../../shared/settings";
 import { format, fromEvent, type Shortcut } from "../../shared/shortcuts";
-
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+import { $, cssTime, keycaps } from "../page";
+import { connectProfiles, linksEditor, nameEditor, profilesStatus, turnOff } from "../profile";
+import { firefoxShortcut, prettyCommand } from "./commands";
+import { initPicker } from "./picker";
 
 // Firefox lets an extension rebind its own commands. Chrome only allows it on
 // its shortcuts page.
@@ -45,7 +46,7 @@ function reveal(el: HTMLElement) {
 	play(el, "appear");
 }
 
-// Fades out, then hides, as the fade (.leaving, 0.16s) ends.
+// Fades out, then hides, as the fade (.leaving, --leave) ends.
 function conceal(el: HTMLElement) {
 	if (el.hidden || fading.has(el)) return;
 	if (calm()) {
@@ -60,7 +61,7 @@ function conceal(el: HTMLElement) {
 			fading.delete(el);
 			el.hidden = true;
 			el.classList.remove("leaving");
-		}, 160),
+		}, cssTime("--leave")),
 	);
 }
 
@@ -71,57 +72,20 @@ function note(text: string, error = false) {
 	if (text && text !== was) play($("note"), "appear");
 }
 
-// Chrome reports "⌘J" on macOS already; Firefox reports "Command+J".
-function prettyCommand(shortcut: string | undefined) {
-	if (!shortcut) return "";
-	if (!isMac) return shortcut;
-	return shortcut
-		.replace("MacCtrl+", "⌃")
-		.replace("Alt+", "⌥")
-		.replace("Shift+", "⇧")
-		.replace(/(Command|Ctrl)\+/, "⌘");
-}
-
-// Firefox's names for the keys a command may use.
-// biome-ignore format: a table, kept a few to a line
-const FIREFOX_KEYS: Record<string, string> = {
-	Comma: "Comma", Period: "Period", Space: "Space", Home: "Home", End: "End",
-	PageUp: "PageUp", PageDown: "PageDown", Insert: "Insert", Delete: "Delete",
-	ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
-};
-
-function firefoxShortcut(s: Shortcut) {
-	const key = /^Key[A-Z]$/.test(s.code)
-		? s.code.slice(3)
-		: /^Digit\d$/.test(s.code)
-			? s.code.slice(5)
-			: /^F([1-9]|1[0-2])$/.test(s.code)
-				? s.code
-				: FIREFOX_KEYS[s.code];
-	if (!key) return null;
-	const mods = [];
-	if (s.alt) mods.push("Alt");
-	if (isMac && s.meta) mods.push("Command");
-	if (s.ctrl) mods.push(isMac ? "MacCtrl" : "Ctrl");
-	if (s.shift) mods.push("Shift");
-	return [...mods, key].join("+");
-}
-
-// Each key of a shortcut gets its own keycap: "⇧⌘K" is ⇧ ⌘ K, and
-// "Ctrl+Shift+K" is Ctrl Shift K. A shortcut that just changed pops in a
-// key at a time.
-function showKeys(el: HTMLElement, shortcut: string) {
+// Each key of a shortcut gets its own keycap. A shortcut that just changed
+// pops in a key at a time. With none, it's "Not set", in red, or "Off" for one
+// that was turned off on purpose.
+function showKeys(el: HTMLElement, shortcut: string, { off = false } = {}) {
 	const changed = el.dataset.shown !== undefined && el.dataset.shown !== shortcut;
 	el.dataset.shown = shortcut;
-	el.classList.toggle("missing", !shortcut);
+	el.classList.toggle("missing", !shortcut && !off);
+	el.classList.toggle("unset", !shortcut && off);
 	if (!shortcut) {
-		el.textContent = "Not set";
+		el.textContent = off ? "Off" : "Not set";
 		return;
 	}
-	// shortcut isn't empty here, so match finds at least one key
-	const keys = shortcut.includes("+") ? shortcut.split("+") : shortcut.match(/[⌃⌥⇧⌘]|[^⌃⌥⇧⌘]+/g)!;
 	el.replaceChildren(
-		...keys.map((key, i) => {
+		...keycaps(shortcut).map((key, i) => {
 			const kbd = Object.assign(document.createElement("kbd"), { textContent: key });
 			if (changed) {
 				kbd.classList.add("pop");
@@ -204,6 +168,12 @@ $("search-reset").addEventListener("click", async () => {
 	await api.storage.sync.remove("searchShortcut");
 	refresh();
 });
+// stored as null, so the default doesn't come back in its place
+$("search-clear").addEventListener("click", async () => {
+	stopRecording();
+	await api.storage.sync.set({ searchShortcut: null });
+	refresh();
+});
 
 for (const [id, key] of [
 	["auto-switch", "autoSwitch"],
@@ -223,8 +193,9 @@ async function refresh() {
 	if (!switchKey && !recording && !$("note").textContent) {
 		note("Another extension or the browser already uses this shortcut. Choose a different one.", true);
 	}
-	showKeys($("search-key"), format(s.searchShortcut));
+	showKeys($("search-key"), s.searchShortcut ? format(s.searchShortcut) : "", { off: true });
 	$("search-reset").hidden = JSON.stringify(s.searchShortcut) === JSON.stringify(DEFAULTS.searchShortcut);
+	$("search-clear").hidden = !s.searchShortcut;
 	$<HTMLInputElement>("auto-switch").checked = s.autoSwitch;
 	$<HTMLInputElement>("include-closed").checked = s.includeClosed;
 	$<HTMLInputElement>("this-window-only").checked = s.thisWindowOnly;
@@ -235,8 +206,6 @@ async function refresh() {
 //
 // Shown only once the profile helper is set up. Until then there's one small
 // offer to set it up, which stays dismissed once closed.
-
-const PERMISSIONS: chrome.permissions.Permissions = { permissions: ["nativeMessaging", "contextMenus"] };
 
 const openSetup = () => {
 	api.tabs.create({ url: "setup.html" });
@@ -260,7 +229,6 @@ function lastTab() {
 	}
 }
 
-const RESIZE_FOR = 300; // ms, as .panels.resizing's transition
 let resized: ReturnType<typeof setTimeout> | 0 = 0;
 
 // Each tab is as tall as it needs to be. Chrome sizes the popup to the page,
@@ -299,7 +267,7 @@ function selectTab(name: string, { ease = false } = {}) {
 	resized = setTimeout(() => {
 		panels.classList.remove("resizing");
 		panels.style.height = "";
-	}, RESIZE_FOR);
+	}, cssTime("--resize"));
 }
 
 const shownTab = () => $(currentTab());
@@ -463,17 +431,17 @@ $("profiles-retry").addEventListener("click", async () => {
 	$("profiles-dot").classList.add("busy");
 	$<HTMLButtonElement>("profiles-retry").disabled = true;
 	$("profiles-status").textContent = "Reconnecting…";
-	const status = await sendMessage({ type: "profilesConnect" }).catch(() => null);
+	const status = await connectProfiles();
 	reconnecting = false;
 	$("profiles-dot").classList.remove("busy");
 	$<HTMLButtonElement>("profiles-retry").disabled = false;
-	if (status && "granted" in status) showStatus(status);
+	if (status) showStatus(status);
 });
 
 setInterval(async () => {
 	if (isFirefox || reconnecting) return;
-	const status = await sendMessage({ type: "profiles" }).catch(() => null);
-	if (!status || !("granted" in status)) return;
+	const status = await profilesStatus();
+	if (!status) return;
 	// turned on or off from elsewhere (setup page, the tabstack command): redraw it all
 	if (status.granted !== granted) refreshProfiles();
 	else if (status.granted) showStatus(status);
@@ -481,8 +449,8 @@ setInterval(async () => {
 
 async function refreshProfiles() {
 	if (isFirefox) return;
-	const status = await sendMessage({ type: "profiles" }).catch(() => null);
-	if (!status || !("granted" in status)) return;
+	const status = await profilesStatus();
+	if (!status) return;
 	const [{ profilesAdHidden }, { profileId }] = await Promise.all([
 		api.storage.sync.get<{ profilesAdHidden?: boolean }>("profilesAdHidden"),
 		api.storage.local.get<{ profileId?: string }>("profileId"),
@@ -504,12 +472,11 @@ async function refreshProfiles() {
 	if (!tabPicked) selectTab(switchable() ? "switch" : lastTab());
 	showStatus(status);
 
-	if (document.activeElement !== $("profile-name")) $<HTMLInputElement>("profile-name").value = status.name;
+	profileName.show(status.name);
 	$<HTMLInputElement>("profile-name").placeholder = status.placeholder;
-	({ profileMark: mark = null } = await api.storage.sync.get<{ profileMark?: Mark }>("profileMark"));
-	showMark();
-	if (document.activeElement !== $("profile-claims"))
-		$<HTMLTextAreaElement>("profile-claims").value = status.claims.join("\n");
+	const { profileMark } = await api.storage.sync.get<{ profileMark?: Mark }>("profileMark");
+	picker.show(profileMark ?? null);
+	profileLinks.show(status.claims.join("\n"));
 	for (const box of document.querySelectorAll<HTMLInputElement>("[data-shared]"))
 		box.checked = !!status.shared[box.dataset.shared as keyof SharedSettings];
 	$("claims-row").hidden = !status.shared.route;
@@ -553,9 +520,7 @@ for (const id of ["profile-keys-change", "open-key-change"]) {
 	});
 }
 $("profiles-off").addEventListener("click", async () => {
-	await api.permissions.remove(PERMISSIONS);
-	// the offer comes back, to turn them on again from here
-	await api.storage.sync.set({ profilesAdHidden: false });
+	await turnOff();
 	await refreshProfiles();
 	// back on General, which sits to the left
 	settle();
@@ -572,183 +537,20 @@ for (const box of document.querySelectorAll<HTMLInputElement>("[data-shared]")) 
 	});
 }
 
-// --- this profile's mark: an icon or letter in a color, as the toolbar icon ---
-//
-// Picked on a page of its own over the settings. The mark shows large at the
-// top; hovering a choice previews it there, and clicking keeps it.
+// --- this profile's name, links and mark (the mark's picker is picker.ts) ---
 
-// a spectrum, then the neutrals: two rows of eight
-// biome-ignore format: a table, kept a few to a line
-const MARK_COLORS: [string, string][] = [
-	["Red", "#e5484d"], ["Orange", "#f2711c"], ["Amber", "#d99a06"], ["Lime", "#7fae1b"],
-	["Green", "#30a46c"], ["Teal", "#0e9aa7"], ["Sky", "#1c9be6"], ["Blue", "#3b6cf6"],
-	["Indigo", "#5b5bd6"], ["Violet", "#7c5cf0"], ["Purple", "#a34fd8"], ["Pink", "#d6409f"],
-	["Brown", "#9e6a4f"], ["Gray", "#8e8e93"], ["Black", "#1d1d1f"], ["White", "#ffffff"],
-];
-const BLUE = "#3b6cf6";
-const STYLE_NAMES: Record<string, string> = { solid: "Solid", clear: "Transparent" };
+// The name and links save a moment after each change, and say so.
+const profileName = nameEditor($("profile-name"), () => play($("name-saved"), "flash"));
+const profileLinks = linksEditor($("profile-claims"), () => play($("claims-saved"), "flash"));
 
-// What else each icon answers to in the picker's search, besides its name.
-// biome-ignore format: a table, kept a few to a line
-const ICON_WORDS: Record<string, string> = {
-	house: "home personal", briefcase: "work job office business", buildings: "company office city",
-	"graduation-cap": "school university study education", book: "read library study",
-	chart: "graph trend stats analytics growth", dollar: "money finance bank pay",
-	code: "dev developer programming brackets html", terminal: "cli shell prompt command console",
-	bug: "debug beetle insect", cpu: "chip hardware computer", database: "data storage server",
-	"git-branch": "github version source", "paint-brush": "art design", palette: "art design paint",
-	"music-note": "song audio", flask: "science lab test experiment", lightbulb: "idea",
-	"game-controller": "games gaming play", airplane: "travel flight", rocket: "launch startup space",
-	lightning: "bolt fast power", fire: "flame hot", globe: "world earth web internet", planet: "space saturn",
-	smiley: "happy face", chat: "message talk", envelope: "mail email", user: "person me account",
-	"shopping-cart": "shop store buy", lock: "secure private", shield: "security safe",
-};
-
-// { icon or glyph, color, style: "solid" or "clear" }, or null for tabstack's own icon
-let mark: Mark | null = null;
-let previewing: Mark | null = null; // the choice under the pointer, shown at the top until it leaves
-
-// The first character as you'd count it, so an accented letter stays whole.
-const firstGlyph = (text: string) => [...new Intl.Segmenter().segment(text)][0]?.segment ?? "";
-
-function initial() {
-	const name = $<HTMLInputElement>("profile-name").value.trim() || $<HTMLInputElement>("profile-name").placeholder;
-	return firstGlyph(name).toUpperCase() || "A";
-}
-
-// The mark with one choice made: an icon or letter, a color, or a style.
-// With no mark yet, a color or style goes with the profile's initial.
-function withChoice(choice: Partial<Mark>): Mark {
-	const base: Mark = mark ?? { glyph: initial(), color: BLUE, style: "solid" };
-	const { color, style } = { ...base, ...choice };
-	const shape = choice.icon || choice.glyph ? choice : base;
-	return shape.icon ? { icon: shape.icon, color, style } : { glyph: shape.glyph, color, style };
-}
-
-// Every choice previews on hover or focus, and is kept on click.
-function choice(button: HTMLElement, pick: () => Partial<Mark>) {
-	const preview = (on: boolean) => {
-		previewing = on ? withChoice(pick()) : null;
-		showHero();
-	};
-	button.addEventListener("pointerenter", () => preview(true));
-	button.addEventListener("pointerleave", () => preview(false));
-	button.addEventListener("focus", () => preview(true));
-	button.addEventListener("blur", () => preview(false));
-	button.addEventListener("click", () => {
-		previewing = null;
-		saveMark(withChoice(pick()));
-	});
-}
-
-// Built once, and filtered by the search: a letter, when one's typed, then
-// every icon.
-const letterChoice = document.createElement("button");
-choice(letterChoice, () => ({ glyph: letterChoice.textContent }));
-const iconChoices = Object.entries(ICONS).map(([icon, path]) => {
-	const button = document.createElement("button");
-	button.title = icon.replaceAll("-", " ");
-	button.setAttribute("aria-label", button.title);
-	button.append(iconSvg(path));
-	choice(button, () => ({ icon }));
-	return { icon, button, words: `${button.title} ${ICON_WORDS[icon] ?? ""}`.split(/\s+/).filter(Boolean) };
+$("profile-name").addEventListener("input", () => picker.nameChanged());
+$("profile-name").addEventListener("keydown", (e) => {
+	if (e.key === "Enter") (e.target as HTMLInputElement).blur();
 });
-$("mark-glyphs").append(letterChoice, ...iconChoices.map((c) => c.button));
 
-const swatches = MARK_COLORS.map(([name, color]) => {
-	const button = document.createElement("button");
-	button.style.setProperty("--swatch", color);
-	button.title = name;
-	button.setAttribute("aria-label", name);
-	choice(button, () => ({ color }));
-	return [color, button] as const;
-});
-$("mark-colors").append(...swatches.map(([, button]) => button));
-
-for (const button of document.querySelectorAll<HTMLElement>("[data-style]"))
-	choice(button, () => ({ style: button.dataset.style as Mark["style"] }));
-
-// an icon's name from ICONS, which is never empty
-const iconTitle = (icon: string) => icon[0]!.toUpperCase() + icon.slice(1).replaceAll("-", " ");
-const colorName = (color: string) => MARK_COLORS.find(([, c]) => c === color)?.[0] ?? color;
-
-// The top of the picker: what's under the pointer, or what's picked. It's
-// redrawn, and pops, only when that changes.
-let heroShown: string | undefined;
-function showHero() {
-	const shown = previewing ?? mark;
-	const key = JSON.stringify(shown);
-	if (key === heroShown) return;
-	heroShown = key;
-	if (!shown) {
-		$("mark-big").replaceChildren(Object.assign(document.createElement("img"), { src: "icons/icon-48.png", alt: "" }));
-		$("mark-title").textContent = "tabstack's icon";
-		$("mark-subtitle").textContent = "Pick an icon or a color below";
-		return;
-	}
-	$("mark-big").replaceChildren(markElement(shown, ICONS[shown.icon ?? ""]));
-	$("mark-title").textContent = shown.icon ? iconTitle(shown.icon) : `Letter ${shown.glyph}`;
-	$("mark-subtitle").textContent = `${STYLE_NAMES[shown.style ?? ""] ?? "Solid"} · ${colorName(shown.color)}`;
-}
-
-function showMark() {
-	$("mark-preview").replaceChildren(
-		mark
-			? markElement(mark, ICONS[mark.icon ?? ""])
-			: Object.assign(document.createElement("span"), { className: "mark empty", textContent: initial() }),
-	);
-	$("mark-remove").hidden = !mark;
-	showHero();
-
-	const style = mark?.style === "clear" ? "clear" : "solid";
-	for (const button of document.querySelectorAll<HTMLElement>("[data-style]")) {
-		button.setAttribute("aria-checked", String(!!mark && button.dataset.style === style));
-	}
-	const grid = $("mark-glyphs");
-	grid.className = `glyphs ${style}`;
-	if (mark) {
-		grid.style.setProperty("--mark", mark.color);
-		grid.style.setProperty("--ink", inkOn(mark.color));
-	}
-	letterChoice.setAttribute("aria-pressed", String(!!mark?.glyph && letterChoice.textContent === mark.glyph));
-	for (const { icon, button } of iconChoices) button.setAttribute("aria-pressed", String(icon === mark?.icon));
-	for (const [color, button] of swatches) button.setAttribute("aria-pressed", String(color === mark?.color));
-}
-
-function saveMark(next: Mark | null) {
-	mark = next;
-	showMark();
-	if (next) api.storage.sync.set({ profileMark: next });
-	else api.storage.sync.remove("profileMark");
-}
-
-// Every word typed has to start a word of an icon's name, or of the words it
-// answers to. A single letter or number can be the mark itself; an emoji
-// can't, since it doesn't draw cleanly at toolbar size.
-function filterIcons() {
-	const query = $<HTMLInputElement>("mark-search").value.trim();
-	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-	let shown = 0;
-	for (const { button, words: theirs } of iconChoices) {
-		button.hidden = !words.every((w) => theirs.some((t) => t.startsWith(w)));
-		if (!button.hidden) shown++;
-	}
-	const glyph = firstGlyph(query);
-	const isLetter = !!query && glyph === query && !/\p{Extended_Pictographic}/u.test(glyph);
-	letterChoice.hidden = !isLetter;
-	if (isLetter) {
-		letterChoice.textContent = glyph;
-		letterChoice.setAttribute("aria-label", `Letter ${glyph}`);
-	}
-	$("mark-empty").hidden = shown > 0 || isLetter;
-	showMark();
-}
-
-// --- a page of its own over the settings: the icon picker ---
-
-// A page slides in from the right, and going back slides the settings in
-// from the left. A shorter page keeps the popup's size, so it doesn't shrink
-// under the pointer.
+// A page of its own over the settings slides in from the right, and going
+// back slides the settings in from the left. A shorter page keeps the popup's
+// size, so it doesn't shrink under the pointer.
 function openView(id: string, focus: string) {
 	settle();
 	document.body.style.minHeight = `${document.body.offsetHeight}px`;
@@ -770,69 +572,11 @@ function closeView(id: string, opener: string) {
 	$(opener).scrollIntoView({ block: "nearest" });
 }
 
-function openPicker() {
-	$<HTMLInputElement>("mark-search").value = "";
-	filterIcons();
-	openView("mark-view", "mark-search");
-}
-
-function closePicker() {
-	previewing = null;
-	closeView("mark-view", "mark-open");
-}
-
-$("mark-open").addEventListener("click", openPicker);
-$("mark-back").addEventListener("click", closePicker);
-$("mark-remove").addEventListener("click", () => saveMark(null));
-$("mark-search").addEventListener("input", filterIcons);
-$("mark-search").addEventListener("keydown", (e) => {
-	if (e.key !== "Enter") return;
-	// the first match: the letter, when one's typed, or the first icon
-	$("mark-glyphs").querySelector<HTMLButtonElement>("button:not([hidden])")?.click();
+const picker = initPicker({
+	name: () => $<HTMLInputElement>("profile-name").value.trim() || $<HTMLInputElement>("profile-name").placeholder,
+	openView,
+	closeView,
 });
-$("mark-view").addEventListener("keydown", (e) => {
-	if (e.key !== "Escape") return;
-	e.preventDefault();
-	if ($<HTMLInputElement>("mark-search").value) {
-		$<HTMLInputElement>("mark-search").value = "";
-		filterIcons();
-	} else {
-		closePicker();
-	}
-});
-
-let nameTimer: ReturnType<typeof setTimeout> | 0 = 0;
-$("profile-name").addEventListener("input", (e) => {
-	if (!mark) showMark(); // with no icon yet, the name's initial stands in
-	clearTimeout(nameTimer);
-	nameTimer = setTimeout(async () => {
-		await api.storage.sync.set({ profileName: (e.target as HTMLInputElement).value.trim() });
-		play($("name-saved"), "flash");
-	}, 300);
-});
-$("profile-name").addEventListener("keydown", (e) => {
-	if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-});
-
-// The profile's links, edited in place and saved a moment after each
-// change, as the name is, or at once when the box loses focus.
-let claimsTimer: ReturnType<typeof setTimeout> | 0 = 0;
-async function saveClaims() {
-	clearTimeout(claimsTimer);
-	claimsTimer = 0;
-	await api.storage.sync.set({
-		profileClaims: $<HTMLTextAreaElement>("profile-claims")
-			.value.split("\n")
-			.map((c) => c.trim())
-			.filter(Boolean),
-	});
-	play($("claims-saved"), "flash");
-}
-$("profile-claims").addEventListener("input", () => {
-	clearTimeout(claimsTimer);
-	claimsTimer = setTimeout(saveClaims, 300);
-});
-$("profile-claims").addEventListener("blur", () => claimsTimer && saveClaims());
 
 refresh();
 refreshProfiles();

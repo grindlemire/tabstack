@@ -4,51 +4,23 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>tabstack: profiles</title>
+		<!-- what this page shares with settings.html, from src/pages/page.css -->
+		<link rel="stylesheet" href="page.css" />
 		<style>
-			/* System fonts only: tabstack makes no network requests, fonts included. */
 			:root {
-				--bg: #f5f5f7;
-				--group: #ffffff;
-				--fg: #1d1d1f;
-				--muted: #6e6e73;
-				--line: rgba(0, 0, 0, 0.08);
 				--code: rgba(0, 0, 0, 0.05);
-				--cap-top: #ffffff;
-				--cap-bottom: #f0f0f3;
-				--cap-edge: rgba(0, 0, 0, 0.16);
-				--accent: #3b6cf6;
-				--accent-soft: rgba(59, 108, 246, 0.12);
-				--ok: #1e8e3e;
-				--error: #d93025;
-				color-scheme: light dark;
+				--rise: 8px;
+				/* setup.js waits this out before closing the tab */
+				--closing: 0.3s;
 			}
 			@media (prefers-color-scheme: dark) {
-				:root {
-					--bg: #18181a;
-					--group: #242427;
-					--fg: #f5f5f7;
-					--muted: #98989d;
-					--line: rgba(255, 255, 255, 0.08);
-					--code: rgba(255, 255, 255, 0.06);
-					--cap-top: #3a3a3e;
-					--cap-bottom: #2e2e32;
-					--cap-edge: rgba(0, 0, 0, 0.5);
-					--accent: #5b85ff;
-					--accent-soft: rgba(91, 133, 255, 0.16);
-					--ok: #5bd17a;
-					--error: #ff6b5b;
-				}
+				:root { --code: rgba(255, 255, 255, 0.06); }
 			}
 
-			* { box-sizing: border-box; }
-			[hidden] { display: none !important; }
 			body {
-				margin: 0;
 				padding: 48px 16px 64px;
-				font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-				color: var(--fg);
-				background: var(--bg);
-				-webkit-font-smoothing: antialiased;
+				font-size: 14px;
+				line-height: 1.5;
 			}
 			main { max-width: 600px; margin: 0 auto; }
 
@@ -104,64 +76,25 @@
 			button {
 				flex: none;
 				padding: 6px 12px;
-				font: inherit;
 				font-size: 13px;
-				font-weight: 500;
-				color: var(--accent);
 				background: var(--accent-soft);
-				border: 0;
 				border-radius: 8px;
-				cursor: pointer;
 			}
 			button.primary { padding: 8px 18px; font-size: 14px; color: #fff; background: var(--accent); }
 			button.quiet { padding: 0; color: var(--accent); background: none; }
-			button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+			button:focus-visible { outline-offset: 2px; }
 
 			.row { display: flex; align-items: center; gap: 12px; }
 			.row .label { flex: 1; }
 			.row .label small { display: block; font-size: 12px; color: var(--muted); }
-			input[type="text"] {
-				width: 220px;
-				max-width: 100%;
-				padding: 6px 10px;
-				font: inherit;
-				color: var(--fg);
-				background: var(--bg);
-				border: 1px solid var(--line);
-				border-radius: 8px;
-				outline: none;
-			}
-			input[type="text"]:focus { border-color: var(--accent); }
+			input[type="text"], textarea { border-radius: 8px; }
+			input[type="text"] { width: 220px; max-width: 100%; padding: 6px 10px; }
 
-			.keys { display: inline-flex; gap: 3px; }
 			.keys + .keys { margin-left: 8px; }
-			kbd {
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				min-width: 22px;
-				height: 22px;
-				padding: 0 5px;
-				font: 500 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-				background: linear-gradient(var(--cap-top), var(--cap-bottom));
-				border-radius: 5px;
-				box-shadow: 0 0 0 0.5px var(--cap-edge), 0 1px 0 var(--cap-edge);
-			}
 
 			.card.stacked { display: flex; flex-direction: column; gap: 8px; }
 			.card.stacked .label small { display: block; font-size: 12px; color: var(--muted); }
-			textarea {
-				width: 100%;
-				padding: 8px 10px;
-				font: 12.5px/1.5 ui-monospace, Menlo, monospace;
-				color: var(--fg);
-				background: var(--bg);
-				border: 1px solid var(--line);
-				border-radius: 8px;
-				outline: none;
-				resize: vertical;
-			}
-			textarea:focus { border-color: var(--accent); }
+			textarea { width: 100%; padding: 8px 10px; font: 12.5px/1.5 ui-monospace, Menlo, monospace; resize: vertical; }
 			.done { display: flex; align-items: center; gap: 12px; margin: 16px 0 0; }
 			.done .status { margin-top: 0; }
 			.status { margin-top: 10px; font-weight: 500; }
@@ -175,8 +108,6 @@
 			.status:empty { display: none; }
 			/* the first thing in its card, once Allow is done with */
 			#allow[hidden] + .status { margin-top: 0; }
-			.status.ok { color: var(--ok); }
-			.status.error { color: var(--error); }
 			.after { margin: 20px 4px 0; color: var(--muted); }
 
 			/* what you get, ticked off */
@@ -203,7 +134,6 @@
 			ul.gets li:nth-child(5) { animation-delay: 0.24s; }
 			.steps > li:nth-child(1) { animation-delay: 0.28s; }
 			.steps > li:nth-child(2) { animation-delay: 0.36s; }
-			@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 
 			/* buttons dip when pressed; the main one brightens under the pointer */
 			button { transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, filter 0.15s ease; }
@@ -230,11 +160,7 @@
 			.pop { animation: pop 0.3s cubic-bezier(0.3, 1.5, 0.5, 1); }
 			@keyframes pop { 40% { transform: scale(1.06); } }
 
-			/* a status line: new words fade in, a problem shakes, and connecting ticks */
-			.appear { animation: appear 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-			@keyframes appear { from { opacity: 0; transform: translateY(-3px); } }
-			.shake { animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
-			@keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+			/* a status line: new words fade in and a problem shakes (page.css), and connecting ticks */
 			.status.ok::before {
 				content: "✓";
 				display: inline-grid;
@@ -253,7 +179,7 @@
 			@keyframes tick { from { transform: scale(0); } }
 
 			/* Done: the page fades as the tab closes */
-			main { transition: opacity 0.3s ease, transform 0.3s ease; }
+			main { transition: opacity var(--closing) ease, transform var(--closing) ease; }
 			body.closing main { opacity: 0; transform: scale(0.98); }
 
 			@media (prefers-reduced-motion: reduce) {

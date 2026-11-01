@@ -84,6 +84,8 @@ async function buildChrome(dev: boolean): Promise<Manifest> {
 		const css = join(src, "pages", page, "index.css");
 		if (existsSync(css)) cpSync(css, join(chrome, `${page}.css`));
 	}
+	// what the settings and setup pages share
+	cpSync(join(src, "pages", "page.css"), join(chrome, "page.css"));
 	await Promise.all(
 		Object.entries(ENTRIES).map(async ([name, entry]) =>
 			writeFileSync(join(chrome, name), await bundle(entry, { dev })),
