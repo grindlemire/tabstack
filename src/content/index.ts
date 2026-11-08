@@ -368,7 +368,18 @@ const TOAST_STYLE = `
 	border: 1px solid var(--line);
 	border-radius: 12px;
 	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+	overflow: hidden;
 	transition: opacity 140ms ease-out, transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* time left before it goes, drained by showToast */
+.timer {
+	position: absolute;
+	inset: auto 0 0 0;
+	height: 3px;
+	background: var(--accent);
+	opacity: 0.55;
+	transform-origin: left;
+	pointer-events: none;
 }
 @starting-style {
 	.toast:popover-open { opacity: 0; transform: translateY(6px); }
@@ -401,12 +412,38 @@ button.dismiss:hover { opacity: 1; }
 }
 `;
 let toastEl: HTMLElement | null = null;
-let toastTimer: ReturnType<typeof setTimeout> | 0 = 0;
+let toastBox: HTMLElement | null = null; // the visible box inside toastEl's shadow root
+let toastClock: Animation | null = null; // the timer bar draining; the toast goes when it ends
 
+// at once: the script is going, or another toast is taking this one's place
 function hideToast() {
-	clearTimeout(toastTimer);
+	toastClock?.cancel();
+	toastClock = null;
 	toastEl?.remove();
 	toastEl = null;
+	toastBox = null;
+}
+
+// The way in, played backwards. It's let go first, so a toast that arrives
+// meanwhile is its own and only fades in over this one.
+function dismissToast() {
+	const el = toastEl;
+	const box = toastBox;
+	if (!el || !box) return;
+	toastClock?.cancel();
+	toastClock = null;
+	toastEl = null;
+	toastBox = null;
+	box.style.pointerEvents = "none";
+	const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+	box
+		.animate(still ? [{ opacity: 0 }] : [{ opacity: 0, transform: "translateY(6px)" }], {
+			duration: 140,
+			easing: "ease-in",
+			fill: "forwards",
+		})
+		.finished.finally(() => el.remove())
+		.catch(() => {});
 }
 
 // mark is the other profile's, when it has one
@@ -422,14 +459,16 @@ function showToast({ id, text, action, mark }: ToastMessage) {
 	const go = Object.assign(document.createElement("button"), { textContent: action });
 	go.addEventListener("click", () => {
 		send({ type: "toastAction", id });
-		hideToast();
+		dismissToast();
 	});
 	const dismiss = Object.assign(document.createElement("button"), { className: "dismiss", textContent: "✕" });
 	dismiss.setAttribute("aria-label", "Dismiss");
-	dismiss.addEventListener("click", hideToast);
+	dismiss.addEventListener("click", dismissToast);
+	const timer = Object.assign(document.createElement("div"), { className: "timer" });
 	if (mark) box.append(markElement(mark, mark.path));
-	box.append(label, go, dismiss);
+	box.append(label, go, dismiss, timer);
 	root.append(box);
+	toastBox = box;
 	placeIn(overlayParent(), toastEl);
 	try {
 		box.showPopover();
@@ -437,13 +476,22 @@ function showToast({ id, text, action, mark }: ToastMessage) {
 		hideToast();
 		return;
 	}
-	// it stays while the pointer's on it
-	const wait = () => {
-		toastTimer = setTimeout(hideToast, TOAST_FOR);
-	};
-	box.addEventListener("pointerenter", () => clearTimeout(toastTimer));
-	box.addEventListener("pointerleave", wait);
-	wait();
+	// The bar is the timer: it drains over TOAST_FOR and the toast goes when
+	// it's empty. It holds while the pointer's on the toast and picks up where
+	// it left off. Hiding the toast cancels it, which rejects finished.
+	const clock = timer.animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], {
+		duration: TOAST_FOR,
+		easing: "linear",
+		fill: "forwards",
+	});
+	toastClock = clock;
+	clock.finished.then(
+		() => toastClock === clock && dismissToast(),
+		() => {},
+	);
+	box.addEventListener("pointerenter", () => clock.pause());
+	// a cancelled clock would start over, so only the live one resumes
+	box.addEventListener("pointerleave", () => toastClock === clock && clock.play());
 }
 
 function onMessage(
