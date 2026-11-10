@@ -119,6 +119,8 @@ export interface Elsewhere {
 // Settings every profile shares (the background's profiles module).
 export interface SharedSettings {
 	searchAll: boolean;
+	// the switch shortcut's cards include other profiles' recent tabs
+	cycleAll: boolean;
 	searchProfiles: boolean;
 	stack: boolean;
 	dupes: boolean;

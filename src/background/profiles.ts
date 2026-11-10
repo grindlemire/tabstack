@@ -82,6 +82,10 @@ interface Reply {
 type PeerBody =
 	| Omit<Reply, "from">
 	| { kind: "tabs"; rid: string }
+	// asked for (recent), or sent unasked as one profile hands over to
+	// another (recentTabs)
+	| { kind: "recent"; rid: string }
+	| { kind: "recentTabs"; tabs?: unknown }
 	| { kind: "find"; rid: string; url?: string }
 	| { kind: "focus"; frame?: Frame | null }
 	| { kind: "activate"; tabId: number; windowId: number; frame?: Frame | null }
@@ -126,6 +130,10 @@ export function createProfiles() {
 	const DUPE_CHECK_FOR = 10_000; // ms after opening that a tab is checked against other profiles
 	const TOAST_ACTION_FOR = 30_000;
 	const BOUNDS_DELAY = 250; // let a drag or resize settle before the others follow
+	const RECENT_SENT = 5; // tabs a cycle can reach, as background/index.ts's CYCLE_SENT
+	// ms after this profile comes forward before asking the others for their
+	// recent tabs, so the one just left has heard it was left
+	const RECENT_DELAY = 150;
 	const RESTART_GAP = 60_000; // ms; restarting to connect is tried once, not in a loop
 	// ms before connecting again to a helper that stopped, doubling each time
 	// it stops without answering. A worker that sleeps in between connects
@@ -136,6 +144,7 @@ export function createProfiles() {
 	// Settings every profile shares. Each keeps a copy, and the newest wins.
 	const SHARED_DEFAULTS: SharedSettings = {
 		searchAll: true,
+		cycleAll: true,
 		searchProfiles: true,
 		stack: true,
 		dupes: true,
@@ -170,6 +179,7 @@ export function createProfiles() {
 	const tabUrls = new Map<number, string | undefined>(); // tab id -> the URL it was last at
 	const createdAt = new Map<number, number>(); // tab id -> when it opened
 	const toastActions = new Map<string, () => void>(); // toast id -> what its button does
+	let recent = new Map<string, TabItem[]>(); // profile -> its most recent tabs, with thumbnails (fetchRecent)
 
 	const granted = () => api.permissions.contains({ permissions: ["nativeMessaging"] });
 	const others = () => peers.filter((p) => p.profile !== profile);
@@ -371,6 +381,8 @@ export function createProfiles() {
 			}
 			updateMenus();
 			publishLabel();
+			// a profile that's new here has sent nothing yet
+			if (others().some((p) => !recent.has(p.profile))) fetchRecent();
 		} else if (msg.type === "msg") {
 			onBody(msg.from, msg.body ?? ({} as PeerBody)).catch((e) => console.warn("[tabstack]", e));
 		} else if (msg.type === "reconnect") {
@@ -422,6 +434,12 @@ export function createProfiles() {
 			}
 			case "tabs":
 				reply(from, body.rid, await tabsForSearch());
+				return;
+			case "recent":
+				reply(from, body.rid, await recentHere());
+				return;
+			case "recentTabs":
+				keepRecent(from, body.tabs);
 				return;
 			case "find":
 				reply(from, body.rid, { tab: await findTab(body.url) });
@@ -626,6 +644,86 @@ export function createProfiles() {
 		return answer;
 	}
 
+	// --- other profiles' recent tabs, for the switch shortcut ---
+	//
+	// The switch shortcut can't wait on other profiles, so their few most
+	// recent tabs, with thumbnails, are kept here ahead of time: asked for
+	// whenever this profile comes forward, and when a profile connects. They
+	// change little while this profile's in front, since no one's using them.
+	// A profile handing over to another sends its own as it goes, with the
+	// tab it's leaving as used just now.
+
+	let inFront = false; // one of this profile's windows has focus
+	let recentTimer: ReturnType<typeof setTimeout> | 0 = 0;
+	api.windows.onFocusChanged.addListener((windowId) => {
+		if (!port) return;
+		const was = inFront;
+		inFront = windowId !== api.windows.WINDOW_ID_NONE;
+		clearTimeout(recentTimer);
+		if (inFront && !was) recentTimer = setTimeout(fetchRecent, RECENT_DELAY);
+	});
+
+	async function fetchRecent() {
+		if (!connected || !shared.values.cycleAll) {
+			recent.clear();
+			return;
+		}
+		const answers = await ask({ kind: "recent" });
+		const live = new Set(others().map((p) => p.profile));
+		recent = new Map([...recent].filter(([id]) => live.has(id)));
+		for (const answer of answers) keepRecent(answer.from, answer.tabs);
+	}
+
+	// A profile's recent tabs, as it sent them. A tab already here keeps the
+	// later of its two times: one sent as a profile handed over beats the
+	// answer to an ask that crossed it.
+	function keepRecent(from: string, sent: unknown) {
+		if (!shared.values.cycleAll || !others().some((p) => p.profile === from)) return;
+		const before = new Map((recent.get(from) ?? []).map((t) => [t.id, t.usedAt ?? 0]));
+		const origin = { profile: from, profileName: nameOf(from) };
+		const tabs: TabItem[] = [];
+		for (const t of Array.isArray(sent) ? sent.slice(0, RECENT_SENT) : []) {
+			const tab = cleanTab(t, { thumb: true });
+			if (!tab) continue;
+			const usedAt = Math.max(tab.usedAt ?? 0, before.get(tab.id) ?? 0) || undefined;
+			tabs.push({ ...tab, ...origin, ...(usedAt && { usedAt }) });
+		}
+		recent.set(from, tabs);
+	}
+
+	// This profile's most recent tabs, for another's switch shortcut, with
+	// the thumbnails dropped when they'd be too big to pass on.
+	async function recentHere(): Promise<{ tabs: TabItem[] }> {
+		if (!hooks) return { tabs: [] };
+		const tabs = (await hooks.snapshot(null, { incognito: false })).slice(0, RECENT_SENT);
+		const size = new TextEncoder().encode(JSON.stringify(tabs)).length;
+		return { tabs: size > MAX_REPLY ? tabs.map((t) => ({ ...t, thumb: null })) : tabs };
+	}
+
+	// This profile is handing over to another: the tab in front is being
+	// left now, before onFocusChanged here says so.
+	async function handOver(to: string) {
+		if (!shared.values.cycleAll) return;
+		const win = await lastWindow();
+		const [front] = win ? await api.tabs.query({ active: true, windowId: win.id }) : [];
+		const { tabs } = await recentHere();
+		const now = Date.now();
+		post(to, { kind: "recentTabs", tabs: tabs.map((t) => (t.id === front?.id ? { ...t, usedAt: now } : t)) });
+	}
+
+	// Other profiles' recent tabs, labeled with their profile, and their marks.
+	function recentElsewhere(): { tabs: TabItem[]; marks: Record<string, Mark> } {
+		if (!connected || !shared.values.cycleAll) return { tabs: [], marks: {} };
+		const live = new Set(others().map((p) => p.profile));
+		const tabs = [...recent].flatMap(([id, list]) => (live.has(id) ? list : []));
+		return { tabs, marks: othersMarks() };
+	}
+
+	const othersMarks = (): Record<string, Mark> =>
+		Object.fromEntries(
+			others().flatMap((p): [string, Mark][] => (markOf(p.profile) ? [[p.profile, markOf(p.profile)!]] : [])),
+		);
+
 	// Every other profile's tabs, labeled with the profile they're in, and
 	// the profiles themselves, so typing one's name switches to it. Their
 	// marks come once, by profile, rather than with every tab.
@@ -633,9 +731,7 @@ export function createProfiles() {
 		const tabs: TabItem[] = [];
 		const closed: ClosedItem[] = [];
 		if (!connected) return { tabs, closed, profiles: [], marks: {} };
-		const marks = Object.fromEntries(
-			others().flatMap((p): [string, Mark][] => (markOf(p.profile) ? [[p.profile, markOf(p.profile)!]] : [])),
-		);
+		const marks = othersMarks();
 		const profiles = shared.values.searchProfiles
 			? others()
 					.filter((p) => p.windows > 0)
@@ -666,14 +762,17 @@ export function createProfiles() {
 	// Brings another profile forward, as the shortcut does.
 	async function switchTo(to: string) {
 		post(to, { kind: "focus", frame: await currentFrame() });
+		handOver(to);
 	}
 
 	async function activateIn(to: string, tabId: number, windowId: number) {
 		post(to, { kind: "activate", tabId, windowId, frame: await currentFrame() });
+		handOver(to);
 	}
 
 	async function restoreIn(to: string, sessionId: string | undefined) {
 		post(to, { kind: "restore", sessionId, frame: await currentFrame() });
+		handOver(to);
 	}
 
 	function closeIn(to: string, tabId: number): undefined {
@@ -1003,6 +1102,7 @@ export function createProfiles() {
 		reconnect,
 		switchTo,
 		searchOthers,
+		recentElsewhere,
 		activateIn,
 		restoreIn,
 		closeIn,
@@ -1058,7 +1158,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 // Another profile's tabs, for search here: its rows are drawn and ranked by
 // their title and address, which throw on anything but a string, so a row
 // keeps only fields of the right type, and one without an id is dropped.
-export function cleanTab(tab: unknown): TabItem | null {
+// Search doesn't show thumbnails; the switch shortcut's cards do (thumb).
+export function cleanTab(tab: unknown, { thumb = false } = {}): TabItem | null {
 	if (!isRecord(tab) || typeof tab.id !== "number" || typeof tab.windowId !== "number") return null;
 	return {
 		id: tab.id,
@@ -1067,7 +1168,7 @@ export function cleanTab(tab: unknown): TabItem | null {
 		icon: imageOf(tab.icon),
 		audible: tab.audible === true,
 		call: tab.call === true,
-		thumb: null,
+		thumb: thumb ? imageOf(tab.thumb) : null,
 		...(Number.isFinite(tab.usedAt) && { usedAt: tab.usedAt as number }),
 	};
 }
