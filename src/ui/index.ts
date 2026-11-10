@@ -419,6 +419,10 @@ export class Switcher {
 	loading: { tabs: boolean; elsewhere: boolean };
 	commitOnLoad: boolean;
 	loadTimer: ReturnType<typeof setTimeout> | undefined;
+	// the row the search key, pressed again, has stepped to (step), and
+	// whether the arrow keys have moved the selection since
+	steps: number;
+	moved: boolean;
 	panel: HTMLDivElement;
 	who: HTMLDivElement;
 	input: HTMLInputElement;
@@ -449,6 +453,8 @@ export class Switcher {
 		this.session = 0; // counts opens, so an answer for an earlier one is dropped
 		this.loading = { tabs: false, elsewhere: false };
 		this.commitOnLoad = false;
+		this.steps = 0;
+		this.moved = false;
 
 		adoptStyle(root, STYLE);
 
@@ -463,6 +469,8 @@ export class Switcher {
 		this.input.setAttribute("aria-controls", "rows");
 		this.input.addEventListener("input", () => {
 			this.cancelCommitOnLoad();
+			this.steps = 0;
+			this.moved = false;
 			this.filter();
 		});
 		this.cards = el("div", "cards");
@@ -532,6 +540,8 @@ export class Switcher {
 		this.profileMarks = {};
 		this.loading = { tabs: false, elsewhere: false };
 		this.cancelCommitOnLoad();
+		this.steps = 0;
+		this.moved = false;
 		// the ring shouldn't slide over from where the last session left it
 		this.ring.classList.add("instant");
 		requestAnimationFrame(() => this.ring.classList.remove("instant"));
@@ -549,9 +559,10 @@ export class Switcher {
 
 	// Other profiles' tabs, and the profiles themselves, which arrive
 	// after this one's tabs, with each profile's mark. Once something's
-	// typed, or the selection's moved, it stays put, and a lone match
-	// doesn't switch on its own, since the list just changed under the
-	// person typing. Before that, the top row is the tab used last, which
+	// typed, or the arrow keys have moved the selection, it stays put, and
+	// a lone match doesn't switch on its own, since the list just changed
+	// under the person typing. Before that, the selection is the tab used
+	// last (or as many back as the search key's been pressed again), which
 	// may be one of these. They fade in, the once.
 	addResults(
 		tabs: TabItem[],
@@ -565,7 +576,7 @@ export class Switcher {
 		this.profiles = profiles;
 		this.profileMarks = marks;
 		this.arriving = new Set([...tabs, ...closed, ...profiles]);
-		this.filter({ keepSelection: !!this.input.value.trim() || this.selected > 0 });
+		this.filter({ keepSelection: !!this.input.value.trim() || this.moved });
 		this.arriving = null;
 	}
 
@@ -622,6 +633,15 @@ export class Switcher {
 		this.loadTimer = setTimeout(() => this.commit(), LOAD_WAIT);
 	}
 
+	// The search key pressed again while searching: one row further down.
+	// Pressed before the list is in, the row it stepped to is selected
+	// once it is (filter).
+	step(): void {
+		this.steps = Math.max(this.steps, this.selected) + 1;
+		const count = this.items().length;
+		if (count) this.select(this.steps % count);
+	}
+
 	waiting(): boolean {
 		if (this.mode !== "search") return false;
 		return this.loading.tabs || (this.loading.elsewhere && !this.input.value.trim());
@@ -664,6 +684,10 @@ export class Switcher {
 	move(delta: number): void {
 		const count = this.items().length;
 		if (count) this.select((this.selected + delta + count) % count);
+		if (this.mode === "search") {
+			this.moved = true;
+			this.steps = this.selected;
+		}
 	}
 
 	// keepSelection keeps the same row selected, wherever it moves to (another
@@ -679,7 +703,8 @@ export class Switcher {
 			this.autoTimer = setTimeout(() => this.commit(), AUTO_SWITCH_DELAY);
 		}
 		const at = kept ? this.results.findIndex((r) => r.item === kept) : -1;
-		this.select(at >= 0 ? at : keepSelection ? Math.min(this.selected, this.results.length - 1) : 0);
+		const last = Math.max(0, this.results.length - 1);
+		this.select(at >= 0 ? at : Math.min(keepSelection ? this.selected : this.steps, last));
 	}
 
 	commit(): void {

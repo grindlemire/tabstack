@@ -21,6 +21,7 @@ On Windows and Linux, use Ctrl in place of Cmd.
 | Cmd+Shift+J | Step forward again, while Cmd is still held |
 | Cmd+Shift+Space | Search your open tabs |
 | Cmd+/ | Search too, but only on web pages |
+| Hold Cmd, press / again | Go further back in search, then let go of Cmd to switch |
 
 <p align="center">
   <img src="docs/cycle.svg" width="660" alt="A cycle through five tabs. Holding Cmd and pressing J selects B, pressing J again selects C, and letting go of Cmd switches to C, which moves to the top of the stack.">

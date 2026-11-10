@@ -95,6 +95,12 @@ const modUpAt: Record<string, number> = {};
 // let go.
 let unheard = false;
 
+// The search key pressed again while searching steps down the list, and
+// letting go of its modifier (this) then switches to that row, as letting
+// go ends a cycle. One press alone leaves search open, to type in.
+let searchHold: Modifier | null = null;
+const heldModifier = () => (["Meta", "Control", "Alt", "Shift"] as const).find((m) => down.has(m)) ?? null;
+
 function hear(e: KeyboardEvent | PointerEvent) {
 	if (!unheard) return;
 	unheard = false;
@@ -119,6 +125,8 @@ listen(window, "keydown", (e) => {
 	hear(e);
 	syncModifiers(e);
 	if (e.key in MODIFIERS) modDownAt[e.key] = Date.now();
+	// a key without it: its release went unheard, and this is typing
+	if (searchHold && !down.has(searchHold)) searchHold = null;
 
 	// off once it's cleared in Settings: no search key on pages
 	const { searchShortcut: search, searchOnPage: on } = settings;
@@ -231,6 +239,7 @@ function show() {
 function hide() {
 	clearTimeout(showTimer);
 	unheard = false;
+	searchHold = null;
 	try {
 		switcher!.panel.hidePopover();
 	} catch {}
@@ -310,14 +319,18 @@ async function onCycle(msg: CycleMessage) {
 function released(key: string) {
 	modUpAt[key] = Date.now();
 	if (key === modifier && switcher?.isOpen && switcher.mode === "cycle") switcher.commit();
+	else if (key === searchHold && switcher?.isOpen && switcher.mode === "search") switcher.commitWhenReady();
 }
 
 async function openSearch() {
 	const s = ensureSwitcher();
 	if (s.isOpen && s.mode === "search") {
-		// already searching: keep what's listed, and put the cursor back
+		// already searching: keep what's listed, put the cursor back, and
+		// step down a row, to switch to on letting go
 		show();
 		s.search();
+		s.step();
+		searchHold = heldModifier();
 		return;
 	}
 	const fromCycle = s.isOpen;
@@ -522,6 +535,9 @@ else send({ type: "started" });
 listen(window, "pointermove", (e) => {
 	hear(e);
 	if (switcher?.isOpen && switcher.mode === "cycle" && !e[MODIFIERS[modifier]]) switcher.commit();
+	if (searchHold && switcher?.isOpen && switcher.mode === "search" && !e[MODIFIERS[searchHold]]) {
+		switcher.commitWhenReady();
+	}
 });
 listen(window, "pointerdown", (e) => {
 	// hostEl is made with the switcher
