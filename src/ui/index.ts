@@ -228,6 +228,11 @@ mark { background: none; color: var(--accent); font-weight: 600; }
 .profile .mark { width: 12px; height: 12px; margin-left: -3px; font-size: 8px; border-radius: 3px; }
 .profile .mark svg { width: 8px; height: 8px; }
 .profile .mark.clear svg { width: 12px; height: 12px; }
+/* another profile's tab among a cycle's cards: its mark and name, over the picture */
+.card .profile { position: absolute; top: 12px; left: 12px; max-width: calc(100% - 24px); box-sizing: border-box; color: var(--fg); background: var(--bg); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+.card .mark { flex: none; display: inline-grid; place-items: center; font-weight: 700; line-height: 1; }
+.card .mark.solid { color: var(--ink); background: var(--mark); }
+.card .mark.clear { color: var(--mark); }
 
 /* other profiles' rows, arriving a moment after this one's */
 .row.arriving { animation: arriving 0.3s ease-out both; }
@@ -529,7 +534,8 @@ export class Switcher {
 		this.close();
 	}
 
-	open(mode: Mode, tabs: TabItem[], closed: ClosedItem[] = []): void {
+	// marks are other profiles', by profile, for their tabs among these
+	open(mode: Mode, tabs: TabItem[], closed: ClosedItem[] = [], marks: Record<string, Mark> = {}): void {
 		this.isOpen = true;
 		this.session++;
 		this.mode = mode;
@@ -537,7 +543,7 @@ export class Switcher {
 		this.debug.textContent = "";
 		this.removed.clear();
 		this.profiles = [];
-		this.profileMarks = {};
+		this.profileMarks = marks;
 		this.loading = { tabs: false, elsewhere: false };
 		this.cancelCommitOnLoad();
 		this.steps = 0;
@@ -811,6 +817,7 @@ export class Switcher {
 			label.append(favicon(tab), el("span", "title", tab.title || host(tab.url)));
 			label.append(...live(tab));
 			card.append(this.thumb(tab), label);
+			if (tab.profileName) card.append(this.profilePill(tab));
 			return card;
 		});
 		this.ring.hidden = !cards.length;
@@ -869,12 +876,7 @@ export class Switcher {
 			const mark = (m: Mark, className?: string) => markElement(m, m.path, className);
 			row.append(item.profileSwitch && profileMark ? mark(profileMark, "favicon") : favicon(item), text);
 			row.append(...live(item));
-			if (item.profileName) {
-				const pill = el("span", "profile");
-				if (profileMark) pill.append(mark(profileMark));
-				pill.append(el("span", "profile-name", item.profileName));
-				row.append(pill);
-			}
+			if (item.profileName) row.append(this.profilePill(item));
 			row.addEventListener("click", () => {
 				this.selected = i;
 				this.commit();
@@ -883,6 +885,15 @@ export class Switcher {
 			this.rowNodes.push(row);
 		});
 		this.rows.append(...nodes);
+	}
+
+	// Another profile's name, by its mark, on that profile's rows and cards.
+	profilePill(item: Item): HTMLElement {
+		const pill = el("span", "profile");
+		const m = item.profile ? this.profileMarks[item.profile] : undefined;
+		if (m) pill.append(markElement(m, m.path));
+		pill.append(el("span", "profile-name", item.profileName ?? ""));
+		return pill;
 	}
 
 	// Highlights the selected row, for the eye and for screen readers.

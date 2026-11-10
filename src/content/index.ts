@@ -276,7 +276,7 @@ async function onCycle(msg: CycleMessage) {
 	// hidden, or orphaned by an extension reload, while it waited, or
 	// search opened meanwhile
 	if (!alive() || document.hidden || s.isOpen) return;
-	s.open("cycle", tabs);
+	s.open("cycle", tabs, [], msg.marks);
 	if (msg.selected != null) s.select(msg.selected);
 	if (again) s.move(again);
 	send({ type: "open" });
