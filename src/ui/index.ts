@@ -28,6 +28,9 @@ const PANEL_PADDING = 12;
 const PANEL_BORDER = 1;
 const PANEL_INSET = PAGE_MARGIN + 2 * (PANEL_PADDING + PANEL_BORDER);
 const AUTO_SWITCH_DELAY = 150;
+// ms Enter waits for search's list before switching to what's there, a bit
+// longer than the background waits for other profiles (background/profiles.ts)
+const LOAD_WAIT = 400;
 const ROW_BATCH = 50; // search rows built at once; more as the selection or the scroll nears the end
 const NEAR_END = 200; // px of rows left below the view when the next batch is built
 // A mark's color marks the selection between these lightnesses (marks.ts):
@@ -412,6 +415,10 @@ export class Switcher {
 	removed: Set<number>;
 	session: number;
 	autoTimer: ReturnType<typeof setTimeout> | undefined;
+	// search's lists still on their way (load), and Enter pressed meanwhile
+	loading: { tabs: boolean; elsewhere: boolean };
+	commitOnLoad: boolean;
+	loadTimer: ReturnType<typeof setTimeout> | undefined;
 	panel: HTMLDivElement;
 	who: HTMLDivElement;
 	input: HTMLInputElement;
@@ -440,6 +447,8 @@ export class Switcher {
 		this.rowNodes = [];
 		this.removed = new Set(); // tabs closed from the switcher, which a refill mustn't bring back
 		this.session = 0; // counts opens, so an answer for an earlier one is dropped
+		this.loading = { tabs: false, elsewhere: false };
+		this.commitOnLoad = false;
 
 		adoptStyle(root, STYLE);
 
@@ -452,7 +461,10 @@ export class Switcher {
 		this.input.autocomplete = "off";
 		this.input.setAttribute("aria-label", "Search tabs");
 		this.input.setAttribute("aria-controls", "rows");
-		this.input.addEventListener("input", () => this.filter());
+		this.input.addEventListener("input", () => {
+			this.cancelCommitOnLoad();
+			this.filter();
+		});
 		this.cards = el("div", "cards");
 		this.ring = el("div", "ring");
 		this.rows = el("div", "rows");
@@ -518,6 +530,8 @@ export class Switcher {
 		this.removed.clear();
 		this.profiles = [];
 		this.profileMarks = {};
+		this.loading = { tabs: false, elsewhere: false };
+		this.cancelCommitOnLoad();
 		// the ring shouldn't slide over from where the last session left it
 		this.ring.classList.add("instant");
 		requestAnimationFrame(() => this.ring.classList.remove("instant"));
@@ -571,14 +585,55 @@ export class Switcher {
 	async load(source: SearchSource): Promise<void> {
 		const session = this.session;
 		const current = () => this.isOpen && this.session === session;
+		this.loading = { tabs: true, elsewhere: true };
 		const lists = await source.tabs();
-		if (!current() || !lists) return;
+		if (!current()) return;
+		this.loading.tabs = false;
+		if (!lists) {
+			this.loading.elsewhere = false;
+			this.loaded();
+			return;
+		}
 		this.setTabs(lists.tabs, lists.closed);
+		this.loaded();
+		if (!current()) return;
 		const elsewhere = await source.elsewhere();
-		if (!current() || !elsewhere) return;
-		if (elsewhere.tabs.length || elsewhere.closed.length || elsewhere.profiles.length) {
+		if (!current()) return;
+		this.loading.elsewhere = false;
+		if (elsewhere && (elsewhere.tabs.length || elsewhere.closed.length || elsewhere.profiles.length)) {
 			this.addResults(elsewhere.tabs, elsewhere.closed, elsewhere.profiles, elsewhere.marks);
 		}
+		this.loaded();
+	}
+
+	// Enter before search's list is in would switch to whatever's there
+	// yet, or nothing. It waits for this profile's tabs, and before
+	// anything's typed, for other profiles' too, since the tab used last
+	// may be in one; for no longer than LOAD_WAIT.
+	commitWhenReady(): void {
+		if (!this.waiting()) {
+			this.commit();
+			return;
+		}
+		// already waiting: asked again (the pointer moving, say), it mustn't wait longer
+		if (this.commitOnLoad) return;
+		this.commitOnLoad = true;
+		clearTimeout(this.loadTimer);
+		this.loadTimer = setTimeout(() => this.commit(), LOAD_WAIT);
+	}
+
+	waiting(): boolean {
+		if (this.mode !== "search") return false;
+		return this.loading.tabs || (this.loading.elsewhere && !this.input.value.trim());
+	}
+
+	loaded(): void {
+		if (this.commitOnLoad && !this.waiting()) this.commit();
+	}
+
+	cancelCommitOnLoad(): void {
+		this.commitOnLoad = false;
+		clearTimeout(this.loadTimer);
 	}
 
 	// Cycling covers only the cards on screen, and wraps; older tabs are
@@ -628,6 +683,7 @@ export class Switcher {
 	}
 
 	commit(): void {
+		this.cancelCommitOnLoad();
 		const item = this.items()[this.selected];
 		if (item) this.onCommit(commitMessage(item));
 		this.close();
@@ -664,6 +720,7 @@ export class Switcher {
 		if (!this.isOpen) return;
 		this.isOpen = false;
 		clearTimeout(this.autoTimer);
+		this.cancelCommitOnLoad();
 		keepBitmaps();
 		this.onClose?.();
 	}
@@ -689,7 +746,7 @@ export class Switcher {
 			this.switchTo.find((p) => String(p.n) === k);
 		if (to) this.switchProfile(to);
 		else if (k === "Escape") this.close();
-		else if (k === "Enter") this.commit();
+		else if (k === "Enter") this.commitWhenReady();
 		else if (closeTab) this.closeSelected();
 		else if (back || prev || (cycling && k === "ArrowLeft")) this.move(-1);
 		else if (next || (cycling && k === "ArrowRight")) this.move(1);

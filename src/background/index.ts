@@ -650,9 +650,8 @@ const MESSAGES: { [K in MessageType]: Handler<K> } = {
 		from: "extension",
 		run: async (msg, { reply }) => {
 			reply({ type: "tabs", ...(await searchTabs(msg.currentId)) });
-			const elsewhere = await searchOthers();
-			if (elsewhere.tabs.length || elsewhere.closed.length || elsewhere.profiles.length)
-				return { type: "moreTabs", ...elsewhere };
+			// even with none, so Enter there knows not to wait for them
+			return { type: "moreTabs", ...(await searchOthers()) };
 		},
 	},
 	profiles: { from: "extension", run: () => profiles?.status() },

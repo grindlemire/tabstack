@@ -52,7 +52,7 @@ watchLabel((label) => switcher.setProfile(label));
 if (inPopup) adoptStyle(shadow, ".rows, .panel.named .rows { max-height: 380px; }");
 
 // The background answers search over the port: this profile's tabs, then
-// other profiles', which only come when there are some.
+// other profiles'.
 let gotTabs: (lists: SearchTabs) => void = () => {};
 let gotMore: (elsewhere: Elsewhere) => void = () => {};
 
