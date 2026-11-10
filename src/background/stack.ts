@@ -2,6 +2,8 @@
 // it can be tested. Each takes the stack (tab ids, most recent first) and
 // returns what replaces it.
 
+import { byRecency, type Listed } from "../ui/rank";
+
 // A cycle that started on a page without the overlay: it jumped from there
 // to the previous tab (via), whose overlay carries it on. to is the tab that
 // overlay commits to, when it's one past via.
@@ -37,6 +39,14 @@ export function committed(jump: Jump | null, overlayTab: number, target: number)
 // The overlay on tabId closed: a jump that stayed on it is over.
 export const overlayClosed = (jump: Jump | null, tabId: number): Jump | null =>
 	jump?.via === tabId && jump.to == null ? null : jump;
+
+// A cycle's tabs (here, the current one first) with other profiles' most
+// recent among them, in the order they were used, as many as it shows.
+export function withElsewhere<T extends Listed>(here: T[], elsewhere: T[], limit: number): T[] {
+	if (!here.length || !elsewhere.length) return here;
+	const [current, ...rest] = here;
+	return [current!, ...byRecency([...rest, ...elsewhere])].slice(0, limit);
+}
 
 // The tabs a switcher lists, by id: those in view, in the stack's order and
 // then the order given, with the current tab first.
