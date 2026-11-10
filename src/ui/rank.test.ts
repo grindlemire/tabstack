@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type Listed, mergeRanges, type Rankable, rank, searchResults } from "./rank";
+import { byRecency, type Listed, mergeRanges, type Rankable, rank, searchResults } from "./rank";
 
 const titles = (items: Rankable[], query: string) => rank(items, query).map((r) => r.item.title);
 
@@ -122,9 +122,27 @@ describe("searchResults", () => {
 		expect(names(searchResults([current, tab("Here too")], [], [], "here"))).toEqual(["Here too"]);
 	});
 
-	test("before anything's typed: a call, then what's playing, then the rest in order", () => {
+	test("before anything's typed: the tab used last, a call, what's playing, then the rest in order", () => {
 		const tabs = [current, tab("A"), tab("Music", { audible: true }), tab("B"), tab("Standup", { call: true })];
-		expect(names(searchResults(tabs, [], [], ""))).toEqual(["Standup", "Music", "A", "B"]);
+		expect(names(searchResults(tabs, [], [], ""))).toEqual(["A", "Standup", "Music", "B"]);
+	});
+
+	test("the tab used last comes first from whichever profile it's in", () => {
+		const here = [{ ...current, usedAt: 500 }, tab("Here 1", { usedAt: 100 }), tab("Here 2", { usedAt: 50 })];
+		const work = [tab("Work 1", { profile: "w", usedAt: 400 }), tab("Work 2", { profile: "w", usedAt: 75 })];
+		expect(names(searchResults([...here, ...work], [], [], ""))).toEqual(["Work 1", "Here 1", "Work 2", "Here 2"]);
+		// back in the work profile, the tab just left is first
+		const there = [
+			{ ...work[0]!, profile: undefined, usedAt: 600 },
+			{ ...work[1]!, profile: undefined },
+		];
+		const home = here.map((t) => ({ ...t, profile: "h", usedAt: t === here[0] ? 600 : t.usedAt }));
+		expect(names(searchResults([...there, ...home], [], [], ""))[0]).toBe("Here");
+	});
+
+	test("an equal match goes to the tab used more recently, in any profile", () => {
+		const tabs = [current, tab("Docs", { usedAt: 10 }), tab("Docs", { profile: "w", usedAt: 20 })];
+		expect(searchResults(tabs, [], [], "docs").map((r) => r.item.profile)).toEqual(["w", undefined]);
 	});
 
 	test("closed tabs and profiles only once something's typed", () => {
@@ -142,6 +160,27 @@ describe("searchResults", () => {
 		const profiles = [tab("Personal mail", { profileSwitch: true })];
 		const results = searchResults([current, tab("Mail")], [], profiles, "mail");
 		expect(names(results)).toEqual(["Personal mail", "Mail"]);
+	});
+});
+
+describe("byRecency", () => {
+	const tab = (title: string, profile?: string, usedAt?: number): Listed => ({ title, profile, usedAt });
+	const names = (tabs: Listed[]) => tabs.map((t) => t.title);
+
+	test("keeps each profile's own order, even when its times disagree", () => {
+		// a cycle passed B on its way back to A: the stack has A first
+		const tabs = [tab("A", undefined, 100), tab("B", undefined, 200), tab("W", "w", 150)];
+		expect(names(byRecency(tabs))).toEqual(["W", "A", "B"]);
+	});
+
+	test("tabs from an older tabstack, with no times, go after the rest, in their order", () => {
+		const tabs = [tab("Old 1", "o"), tab("Old 2", "o"), tab("A", undefined, 100), tab("B", undefined, 50)];
+		expect(names(byRecency(tabs))).toEqual(["A", "B", "Old 1", "Old 2"]);
+	});
+
+	test("one profile alone is left as it is", () => {
+		const tabs = [tab("A"), tab("B", undefined, 5), tab("C", undefined, 1)];
+		expect(names(byRecency(tabs))).toEqual(["A", "B", "C"]);
 	});
 });
 

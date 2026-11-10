@@ -51,6 +51,9 @@ export interface TabItem {
 	audible: boolean;
 	call: boolean;
 	thumb: string | null;
+	// when it was last in front, so search can put tabs from every profile in
+	// the order they were used
+	usedAt?: number;
 	profile?: string;
 	profileName?: string;
 	closed?: undefined;

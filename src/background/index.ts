@@ -55,10 +55,14 @@ type CycleMessage = Extract<PageMessage, { type: "cycle" }>;
 // What's kept in storage.session.
 interface SessionStore extends ThumbStore {
 	stack?: number[];
+	usedAt?: Record<string, number>;
 	inCall?: Record<string, number[]>;
 }
 
 let stack: number[] = []; // tab ids, most recent first
+// tab id -> when it was last in front. Other profiles' search goes by it to
+// put their tabs among this one's (ui/rank.ts).
+const usedAt = new Map<number, number>();
 const inCall = new Map<number, Set<number>>(); // tab id -> ids of its frames using the microphone or camera
 const overlayOpen = new Set<number>(); // tab ids showing the switcher
 let switcherPort: chrome.runtime.Port | null = null;
@@ -88,6 +92,9 @@ async function load() {
 		// first run this session: seed from the browser's own record
 		stack = [...tabs].sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0)).map((t) => t.id!);
 	}
+	for (const [id, at] of Object.entries(saved.usedAt ?? {})) {
+		if (ids.has(Number(id))) usedAt.set(Number(id), at);
+	}
 	for (const [id, frames] of Object.entries(saved.inCall ?? {})) {
 		if (ids.has(Number(id))) inCall.set(Number(id), new Set(frames));
 	}
@@ -97,16 +104,24 @@ async function load() {
 onSettingsChange((s) => (settings = s));
 
 function save() {
-	api.storage.session.set({ stack });
+	api.storage.session.set({ stack, usedAt: Object.fromEntries(usedAt) });
+}
+
+// The tab in front was in front until now: it's being left.
+function leaveFront() {
+	if (stack[0] != null) usedAt.set(stack[0], Date.now());
 }
 
 function touch(tabId: number) {
+	leaveFront();
+	usedAt.set(tabId, Date.now());
 	({ stack, jump } = toFront(stack, tabId, jump));
 	save();
 }
 
 function forget(tabId: number) {
 	stack = stack.filter((id) => id !== tabId);
+	usedAt.delete(tabId);
 	overlayOpen.delete(tabId);
 	if (inCall.delete(tabId)) saveCalls();
 	save();
@@ -141,9 +156,15 @@ api.tabs.onActivated.addListener(async ({ tabId }) => {
 	if (Date.now() - lastIconUpdate > 10_000) updateToolbarIcon();
 });
 
+// Focus going to another profile's window, or another app, leaves this
+// profile's tab in front, as far as search in other profiles is concerned.
 api.windows.onFocusChanged.addListener(async (windowId) => {
-	if (windowId === api.windows.WINDOW_ID_NONE) return;
 	await ready;
+	if (windowId === api.windows.WINDOW_ID_NONE) {
+		leaveFront();
+		save();
+		return;
+	}
 	const [tab] = await api.tabs.query({ active: true, windowId });
 	if (tab) touch(tab.id!);
 });
@@ -158,6 +179,9 @@ api.tabs.onRemoved.addListener(async (tabId) => {
 api.tabs.onReplaced?.addListener(async (added, removed) => {
 	await ready;
 	stack = stack.map((id) => (id === removed ? added : id));
+	const at = usedAt.get(removed);
+	usedAt.delete(removed);
+	if (at != null) usedAt.set(added, at);
 	overlayOpen.delete(removed);
 	if (inCall.delete(removed)) saveCalls();
 	save();
@@ -227,6 +251,7 @@ async function snapshot(
 			audible: !!t.audible && !t.mutedInfo?.muted,
 			call: isCall(t),
 			thumb: forSearch ? null : thumbnails.thumbFor(t),
+			usedAt: usedAt.get(t.id!) ?? t.lastAccessed,
 		};
 	});
 }

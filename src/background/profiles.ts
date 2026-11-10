@@ -1068,6 +1068,7 @@ export function cleanTab(tab: unknown): TabItem | null {
 		audible: tab.audible === true,
 		call: tab.call === true,
 		thumb: null,
+		...(Number.isFinite(tab.usedAt) && { usedAt: tab.usedAt as number }),
 	};
 }
 

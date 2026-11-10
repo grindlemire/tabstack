@@ -534,9 +534,11 @@ export class Switcher {
 	}
 
 	// Other profiles' tabs, and the profiles themselves, which arrive
-	// after this one's tabs, with each profile's mark. The selection stays
-	// put, and a lone match doesn't switch on its own, since the list just
-	// changed under the person typing. They fade in, the once.
+	// after this one's tabs, with each profile's mark. Once something's
+	// typed, or the selection's moved, it stays put, and a lone match
+	// doesn't switch on its own, since the list just changed under the
+	// person typing. Before that, the top row is the tab used last, which
+	// may be one of these. They fade in, the once.
 	addResults(
 		tabs: TabItem[],
 		closed: ClosedItem[],
@@ -549,7 +551,7 @@ export class Switcher {
 		this.profiles = profiles;
 		this.profileMarks = marks;
 		this.arriving = new Set([...tabs, ...closed, ...profiles]);
-		this.filter({ keepSelection: true });
+		this.filter({ keepSelection: !!this.input.value.trim() || this.selected > 0 });
 		this.arriving = null;
 	}
 

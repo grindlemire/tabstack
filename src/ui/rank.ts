@@ -13,9 +13,12 @@ export interface Rankable {
 	audible?: boolean;
 }
 
-// What search lists, and where: a profile to switch to goes first.
+// What search lists, and where: a profile to switch to goes first, and tabs
+// go in the order they were used, whichever profile they're in.
 export interface Listed extends Rankable {
 	profileSwitch?: boolean;
+	profile?: string;
+	usedAt?: number;
 }
 
 // [start, end) of a match, in the lowercased text, which is only kept when
@@ -186,16 +189,44 @@ export function rank<T extends Rankable>(items: T[], query: string): Ranked<T>[]
 	return [];
 }
 
+// Tabs from every profile, most recently used first. Each profile's own
+// order is kept, since its stack knows better than the times (a cycle that
+// passed a tab doesn't make it the last one used); the profiles are
+// interleaved by when their next tab was last in front. A tab without a
+// time (from an older tabstack) goes after those with one.
+export function byRecency<T extends Listed>(tabs: T[]): T[] {
+	const lists = new Map<string | undefined, T[]>();
+	for (const tab of tabs) {
+		const list = lists.get(tab.profile);
+		if (list) list.push(tab);
+		else lists.set(tab.profile, [tab]);
+	}
+	const heads = [...lists.values()];
+	const out: T[] = [];
+	while (out.length < tabs.length) {
+		let next = heads.findIndex((l) => l.length);
+		for (let i = next + 1; i < heads.length; i++) {
+			if ((heads[i]![0]?.usedAt ?? 0) > (heads[next]![0]?.usedAt ?? 0)) next = i;
+		}
+		out.push(heads[next]!.shift()!);
+	}
+	return out;
+}
+
 // What search lists for a query: the tab you're on (tabs[0]) never; closed
-// tabs and other profiles once something's typed. Before anything's typed, a
-// call comes first, then what's playing. A profile whose name matches goes
-// above every tab.
+// tabs and other profiles once something's typed. Before anything's typed,
+// the tab used last comes first, in any profile, so the search key and Enter
+// go back to it; then a call, then what's playing, then the rest. A profile
+// whose name matches goes above every tab.
 export function searchResults<T extends Listed>(tabs: T[], closed: T[], profiles: T[], query: string): Ranked<T>[] {
 	const q = query.trim();
-	const ranked = rank([...tabs.slice(1), ...(q ? [...closed, ...profiles] : [])], q);
-	// (sort is stable, so the rest keep their recency order)
-	const order = (r: Ranked<T>) => (r.item.call ? 0 : r.item.audible ? 1 : 2);
-	if (!q) ranked.sort((a, b) => order(a) - order(b));
+	let ranked = rank([...byRecency(tabs.slice(1)), ...(q ? [...closed, ...profiles] : [])], q);
+	if (!q) {
+		// (sort is stable, so the rest keep their recency order)
+		const order = (r: Ranked<T>) => (r.item.call ? 0 : r.item.audible ? 1 : 2);
+		const [last, ...rest] = ranked;
+		ranked = last ? [last, ...rest.sort((a, b) => order(a) - order(b))] : [];
+	}
 	return [...ranked.filter((r) => r.item.profileSwitch), ...ranked.filter((r) => !r.item.profileSwitch)];
 }
 
