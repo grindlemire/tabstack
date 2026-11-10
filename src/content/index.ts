@@ -10,6 +10,7 @@ import { sendMessage } from "../shared/messages";
 import { DEFAULTS, loadSettings, onSettingsChange, type Settings, watchLabel } from "../shared/settings";
 import { matches } from "../shared/shortcuts";
 import { adoptStyle, answered, Switcher } from "../ui";
+import { COLD_WORKER, cycleStart } from "./held";
 
 declare global {
 	// The live copy's teardown, which the next copy calls (below).
@@ -27,7 +28,6 @@ const MODIFIERS: Record<Modifier, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">
 	Shift: "shiftKey",
 };
 const SHOW_DELAY = 120; // a quick tap switches without flashing the UI
-const COLD_WORKER = 1000; // ms: a service worker younger than this was just started for the shortcut
 const PRESS_RECENT = 3000; // ms: a modifier press older than this wasn't for this switch
 
 // A newer copy of this script (extension reload, or injection into a tab
@@ -272,15 +272,17 @@ async function onCycle(msg: CycleMessage) {
 	if (again) s.move(again);
 	send({ type: "open" });
 
-	// This frame never saw the modifier go down when we were switched to
-	// mid-shortcut from a page tabstack can't run on, or when focus is in
-	// an iframe, whose keys go to its own document (relay.ts passes on
-	// only the release). Count it as held unless it has already come up.
-	// (either side missing compares false: still held)
+	// relay.ts passes on only the release from an iframe (held.ts)
 	const inIframe = document.activeElement?.tagName === "IFRAME";
-	const unseen = msg.jumped || inIframe;
-	const stillHeld = unseen ? !((modUpAt[modifier] as number) >= (msg.timing.commandAt as number)) : held();
-	if (!stillHeld) {
+	const start = cycleStart({
+		timing: msg.timing,
+		jumped: !!msg.jumped,
+		inIframe,
+		isFirefox,
+		held: held(),
+		releasedAt: modUpAt[modifier],
+	});
+	if (start === "tap") {
 		// the modifier came up before this message arrived (or the page
 		// never saw it go down): it was a quick tap, so just switch
 		report({ releasedBeforeMessage: true });
@@ -289,8 +291,9 @@ async function onCycle(msg: CycleMessage) {
 	}
 	if (msg.jumped) down.add(modifier);
 	takeFocusFromIframe();
-	if (msg.jumped && isFirefox) {
+	if (start === "listen") {
 		// stay hidden: it was most likely a tap
+		report({ listening: true });
 		unheard = true;
 		return;
 	}
@@ -551,6 +554,7 @@ function report(extra: Timing) {
 	if (t.searchTabsMs != null) parts.push(`tabs loaded ${t.searchTabsMs}ms`);
 	if (t.jumped) parts.push("jumped from restricted page");
 	if (t.releasedBeforeMessage) parts.push("released before message");
+	if (t.listening) parts.push("hidden until the next input");
 	switcher?.setDebug(parts.join(" · "));
 	console.log("[tabstack]", { ...t });
 }

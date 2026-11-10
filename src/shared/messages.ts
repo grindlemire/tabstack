@@ -158,6 +158,7 @@ export interface Timing {
 	paintMs?: number;
 	searchTabsMs?: number;
 	releasedBeforeMessage?: boolean;
+	listening?: boolean; // the page couldn't tell whether the modifier was still down
 }
 
 // --- to the background ---
