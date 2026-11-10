@@ -451,11 +451,15 @@ export function createProfiles() {
 				return;
 			}
 			// Chrome throws at once, past any catch, on an ID that isn't a number
-			case "activate":
+			// A tab that closed since it was listed (a switch shortcut's card
+			// can be a few minutes old) still brings this profile forward.
+			case "activate": {
 				if (typeof body.tabId !== "number" || typeof body.windowId !== "number") return;
-				await api.tabs.update(body.tabId, { active: true }).catch(() => {});
-				await present(await api.windows.get(body.windowId).catch(() => null), body.frame);
+				const tab = await api.tabs.update(body.tabId, { active: true }).catch(() => null);
+				const win = tab ? await api.windows.get(tab.windowId).catch(() => null) : null;
+				await present(win ?? (await lastWindow()), body.frame);
 				return;
+			}
 			case "restore": {
 				const session = await api.sessions.restore(body.sessionId).catch(() => null);
 				const windowId = session?.tab?.windowId ?? session?.window?.id;
