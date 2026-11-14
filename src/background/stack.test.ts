@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { committed, type Jump, order, overlayClosed, putFirst, toFront } from "./stack";
+import { committed, type Jump, order, overlayClosed, putFirst, toFront, withElsewhere } from "./stack";
 
 // Tabs 1 to 5; the background's steps, in the order a cycle takes them.
 const A = 1;
@@ -79,5 +79,25 @@ describe("a cycle", () => {
 	test("closing a tab mid-cycle: the one below takes its place", () => {
 		const stack = [A, B, C, D, E, 6].filter((id) => id !== B);
 		expect(order(stack, [A, C, D, E, 6], A, 5)).toEqual([A, C, D, E, 6]);
+	});
+});
+
+describe("withElsewhere", () => {
+	const tab = (title: string, usedAt: number, profile?: string) => ({ title, usedAt, profile });
+	const titles = (tabs: { title: string }[]) => tabs.map((t) => t.title);
+	const here = [tab("Current", 900), tab("Here 1", 500), tab("Here 2", 300), tab("Here 3", 100)];
+
+	test("the tab you're on stays first; the rest go in the order they were used", () => {
+		const work = [tab("Work 1", 800, "w"), tab("Work 2", 200, "w")];
+		expect(titles(withElsewhere(here, work, 5))).toEqual(["Current", "Work 1", "Here 1", "Here 2", "Work 2"]);
+	});
+
+	test("as many as the cycle shows", () => {
+		const work = [tab("Work 1", 800, "w"), tab("Work 2", 700, "w")];
+		expect(titles(withElsewhere(here, work, 3))).toEqual(["Current", "Work 1", "Work 2"]);
+	});
+
+	test("with nothing from other profiles, the tabs are left as they are", () => {
+		expect(withElsewhere(here, [], 2)).toBe(here);
 	});
 });

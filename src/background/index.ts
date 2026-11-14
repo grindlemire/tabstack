@@ -30,7 +30,7 @@ import type {
 import { DEFAULTS, loadSettings, onSettingsChange, type Settings, watchLabel } from "../shared/settings";
 import { createProfiles } from "./profiles";
 import { parseShortcut } from "./shortcut";
-import { committed, type Jump, order, overlayClosed, putFirst, toFront } from "./stack";
+import { committed, type Jump, order, overlayClosed, putFirst, toFront, withElsewhere } from "./stack";
 import { createThumbnails, type ThumbStore } from "./thumbnails";
 import { overlayCanRun } from "./urls";
 
@@ -346,7 +346,16 @@ async function cycle(tab: chrome.tabs.Tab | undefined, timing: Timing) {
 		if (!overlayOpen.has(tab.id!)) {
 			const start = performance.now();
 			const [tabs, shortcut] = await Promise.all([snapshot(tab.id), switchShortcut()]);
-			Object.assign(message, { tabs, modifier: shortcut.modifier, switchCode: shortcut.code });
+			// Other profiles' recent tabs, kept ahead of time (profiles.ts).
+			// Not from an incognito window, which other profiles never hear
+			// of, nor with the cycle kept to this window.
+			const elsewhere = tab.incognito || settings.thisWindowOnly ? null : profiles?.recentElsewhere();
+			Object.assign(message, {
+				tabs: withElsewhere(tabs, elsewhere?.tabs ?? [], CYCLE_SENT),
+				...(elsewhere?.tabs.length && { marks: elsewhere.marks }),
+				modifier: shortcut.modifier,
+				switchCode: shortcut.code,
+			});
 			timing.snapshotMs = Math.round(performance.now() - start);
 		}
 		try {
@@ -577,7 +586,8 @@ const MESSAGES: { [K in MessageType]: Handler<K> } = {
 	activate: {
 		from: "page",
 		run: async (msg, { tabId }) => {
-			if (tabId != null) jump = committed(jump, tabId, msg.tabId);
+			// another profile's tab ids are its own, not this one's
+			if (tabId != null && !msg.profile) jump = committed(jump, tabId, msg.tabId);
 			await activateItem(msg);
 			return { type: "done" };
 		},

@@ -245,6 +245,8 @@ export type PageMessage =
 			type: "cycle";
 			timing: Timing;
 			tabs?: TabItem[];
+			// other profiles' marks, by profile, for their tabs among these
+			marks?: Record<string, Mark>;
 			modifier?: Modifier;
 			switchCode?: string | null;
 			// switched to mid-shortcut from a page tabstack can't run on
