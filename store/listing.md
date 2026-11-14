@@ -49,7 +49,7 @@ Click the toolbar icon to:
 - include recently closed tabs in search
 - cycle through the current window's tabs only
 
-If you use more than one Chrome profile, an optional helper app connects tabstack in each of them. Ctrl+Cmd+Right and Left switch between profiles, search covers every profile's tabs, and links you list for a profile open there from any profile. Nothing changes unless you set it up; see https://tabstack.alethi.dev for how.
+If you use more than one Chrome profile, an optional helper app connects tabstack in each of them. Ctrl+Cmd+Right and Left switch between profiles, Cmd+J goes back to your last tab whichever profile it's in, search covers every profile's tabs, and links you list for a profile open there from any profile. Nothing changes unless you set it up; see https://tabstack.alethi.dev for how.
 
 Privacy
 tabstack has no servers of its own and never sends your tabs, history or settings anywhere. Your settings, tab order and thumbnails stay in the browser's extension storage on your computer, and there's no account or analytics. The optional profile helper only passes messages between tabstack in your profiles on the same computer.
@@ -188,6 +188,15 @@ Firefox doesn't let extensions draw on its own pages, such as about: pages and t
 
 The "Release notes" field when uploading a new version. Each version's covers
 what changed since the one the store last had.
+
+**1.3.0** (since 1.2.1):
+
+```
+- The first Cmd+J after a while no longer leaves the switcher open.
+- In search, hold Cmd and press / again to go further down the list, then let go to switch.
+- Pressing Enter as soon as search opens switches to the right tab, not whatever was listed first.
+- Chrome, across profiles: Cmd+J goes back to the tab you used last, whichever profile it's in, and holding Cmd shows other profiles' recent tabs marked with their profile's icon. Search lists the tab you used last first, too. Turn it off under Profiles with "Go back to tabs in every profile".
+```
 
 **1.2.0** (since 1.1.1):
 
