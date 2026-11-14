@@ -66,6 +66,17 @@ describe("cleanTab", () => {
 		expect(cleanTab(tab)).toEqual({ ...tab, thumb: null });
 	});
 
+	test("keeps a thumbnail, and the time it was last used, for the switch shortcut's cards", () => {
+		const tab = { id: 4, windowId: 2, icon: null, audible: false, call: false, usedAt: 1234 };
+		expect(cleanTab({ ...tab, thumb: "data:image/webp;base64,BB" }, { thumb: true })).toEqual({
+			...tab,
+			thumb: "data:image/webp;base64,BB",
+		});
+		// only an image
+		expect(cleanTab({ ...tab, thumb: "https://example.com/x.png" }, { thumb: true })?.thumb).toBeNull();
+		expect(cleanTab({ ...tab, usedAt: "soon" })).not.toHaveProperty("usedAt");
+	});
+
 	test("drops fields of the wrong type, and rows without ids", () => {
 		expect(cleanTab({ id: 1, windowId: 1, title: 5, url: {}, icon: "javascript:x", audible: "yes" })).toEqual({
 			id: 1,
