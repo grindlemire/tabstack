@@ -75,6 +75,7 @@ Browsers don't let extensions draw on their own pages, like `chrome://` pages an
 Chrome keeps each profile's extensions apart, so on its own tabstack only sees the tabs in the profile it's in. If you keep more than one, like Work and Personal, an optional helper, the `tabstack` command, connects tabstack in all of them:
 
 - **Ctrl+Cmd+Right** and **Ctrl+Cmd+Left** bring the next or previous profile's window to the front. The windows stay stacked in the same place and size, so it feels like flipping between them.
+- Cmd+J goes back to the tab you used last, whichever profile it's in, and holding Cmd shows other profiles' recent tabs among the cards. Search does the same: the tab you used last comes first.
 - Search covers every profile's tabs, and typing a profile's name switches to it.
 - Links to sites you list for a profile open there, whichever profile you click them in.
 - The right-click menu moves a tab, or opens a link, in another profile.
